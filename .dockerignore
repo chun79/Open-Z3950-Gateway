@@ -1,0 +1,26 @@
+# Git
+.git
+.gitignore
+
+# Node
+node_modules/
+webapp/node_modules/
+webapp/dist/
+
+# Go
+gateway
+zserver
+*.exe
+*.test
+*.out
+vendor/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data
+data/
+*.db
+*.sqlite
+*.log
