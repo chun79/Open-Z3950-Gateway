@@ -2,6 +2,7 @@ package auth
 
 import (
 	"errors"
+	"os"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -9,7 +10,15 @@ import (
 	"github.com/yourusername/open-z3950-gateway/pkg/provider"
 )
 
-var jwtSecret = []byte("YOUR_SECRET_KEY_SHOULD_BE_ENV_VAR") // TODO: Read from env
+var jwtSecret = []byte(getSecret())
+
+func getSecret() string {
+	secret := os.Getenv("JWT_SECRET")
+	if secret == "" {
+		return "YOUR_SECRET_KEY_SHOULD_BE_ENV_VAR" // Default for dev
+	}
+	return secret
+}
 
 type Claims struct {
 	UserID   int64  `json:"uid"`
