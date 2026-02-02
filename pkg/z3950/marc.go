@@ -23,16 +23,22 @@ type Holding struct {
 }
 
 type MARCRecord struct {
-	Leader    string      `json:"leader"`
-	Fields    []MARCField `json:"fields"`
-	RecordID  string      `json:"record_id"`
-	Title     string      `json:"title"`
-	Author    string      `json:"author"`
-	ISBN      string      `json:"isbn"`
-	ISSN      string      `json:"issn"`
-	Publisher string      `json:"publisher"`
-	Subject   string      `json:"subject"`
-	Holdings  []Holding   `json:"holdings"`
+	Leader              string      `json:"leader"`
+	Fields              []MARCField `json:"fields"`
+	RecordID            string      `json:"record_id"`
+	Title               string      `json:"title"`
+	Author              string      `json:"author"`
+	ISBN                string      `json:"isbn"`
+	ISSN                string      `json:"issn"`
+	Publisher           string      `json:"publisher"`
+	Subject             string      `json:"subject"`
+	Summary             string      `json:"summary"`
+	TOC                 string      `json:"toc"`
+	Edition             string      `json:"edition"`
+	PhysicalDescription string      `json:"physical_description"`
+	Series              string      `json:"series"`
+	Notes               string      `json:"notes"`
+	Holdings            []Holding   `json:"holdings"`
 }
 
 type MARCProfile struct {
@@ -127,6 +133,20 @@ func (r *MARCRecord) PopulateFriendlyFields() {
 	r.ISSN = r.GetISSN(p)
 	r.Publisher = r.GetPublisher(p)
 	r.Subject = r.GetSubject(p)
+	
+	// Extended fields
+	r.Summary = r.GetFieldByTag("520")
+	r.TOC = r.GetFieldByTag("505")
+	r.Edition = r.GetFieldByTag("250")
+	r.PhysicalDescription = r.GetFieldByTag("300")
+	
+	// Series: Try 490, fallback to 830
+	r.Series = r.GetFieldByTag("490")
+	if r.Series == "" {
+		r.Series = r.GetFieldByTag("830")
+	}
+	
+	r.Notes = r.GetFieldByTag("500")
 }
 
 func cleanSubfields(data []byte) string {

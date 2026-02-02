@@ -8,6 +8,12 @@ export interface Book {
   publisher?: string
   source?: string
   record_id?: string
+  summary?: string
+  toc?: string
+  edition?: string
+  physical?: string
+  series?: string
+  notes?: string
   holdings?: Holding[]
 }
 

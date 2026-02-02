@@ -85,6 +85,26 @@ Access the application at **http://localhost:8899**.
     ./gateway
     ```
 
+## ⚙️ Configuration
+
+The application is configured via environment variables.
+
+| Variable | Description | Default |
+| :--- | :--- | :--- |
+| `DB_PROVIDER` | Database backend: `sqlite` or `postgres` | `sqlite` |
+| `DB_PATH` | Path to SQLite database file | `./library.db` |
+| `DB_DSN` | Postgres connection string | - |
+| `JWT_SECRET` | Secret key for signing JWT tokens | (Hardcoded dev secret) |
+| `PORT` | HTTP Server Port | `8899` |
+| `ZSERVER_PORT` | Z39.50 Server Port | `2100` |
+| `GATEWAY_API_KEY`| API Key for protected non-user endpoints | - |
+| `ZSERVER_ALLOWED_IPS` | CIDR allowlist for Z39.50 server | `0.0.0.0/0` |
+
+## 🛠 Maintenance Tools
+
+The project includes a suite of administrative and debugging tools in `cmd/tools/`.
+See [docs/TOOLS.md](docs/TOOLS.md) for a complete list and usage instructions.
+
 ## 🔌 API Documentation
 
 All API endpoints start with `/api`. Protected endpoints require `Authorization: Bearer <token>` or `X-API-Key`.

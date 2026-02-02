@@ -1,10 +1,12 @@
 import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom'
 import Search from './pages/Search'
+import BookDetail from './pages/BookDetail'
 import Requests from './pages/Requests'
 import Browse from './pages/Browse'
 import Login from './pages/Login'
 import Settings from './pages/Settings'
 import { AuthProvider, useAuth } from './context/AuthContext'
+import { I18nProvider, useI18n } from './context/I18nContext'
 
 function ProtectedRoute({ children }: { children: JSX.Element }) {
   const { isAuthenticated } = useAuth();
@@ -27,44 +29,52 @@ function AdminRoute({ children }: { children: JSX.Element }) {
 
 function Navigation() {
   const { isAuthenticated, logout, user } = useAuth();
+  const { t, locale, setLocale } = useI18n();
+  
   return (
     <nav>
       <ul>
-        <li><strong>📚 Open Z39.50 Gateway</strong></li>
+        <li><strong>📚 {t('nav.brand')}</strong></li>
       </ul>
       <ul>
         {isAuthenticated ? (
           <>
             <li>
               <NavLink to="/" role="button" className={({ isActive }) => isActive ? '' : 'outline'}>
-                Search
+                {t('nav.search')}
               </NavLink>
             </li>
             <li>
               <NavLink to="/browse" role="button" className={({ isActive }) => isActive ? '' : 'outline'}>
-                Browse
+                {t('nav.browse')}
               </NavLink>
             </li>
             <li>
               <NavLink to="/requests" role="button" className={({ isActive }) => isActive ? '' : 'outline'}>
-                ILL Requests
+                {t('nav.requests')}
               </NavLink>
             </li>
             {user?.role === 'admin' && (
               <li>
                 <NavLink to="/settings" role="button" className={({ isActive }) => isActive ? '' : 'outline'}>
-                  Settings
+                  {t('nav.settings')}
                 </NavLink>
               </li>
             )}
             <li>
-              <span style={{ marginRight: '10px' }}>👤 {user?.username}</span>
-              <button onClick={logout} className="outline secondary">Logout</button>
+              <button 
+                className="outline secondary" 
+                style={{ padding: '5px 10px', fontSize: '0.8em', marginRight: '10px' }}
+                onClick={() => setLocale(locale === 'en' ? 'zh' : 'en')}
+              >
+                {locale === 'en' ? '中文' : 'English'}
+              </button>
+              <button onClick={logout} className="outline secondary">{t('nav.logout')}</button>
             </li>
           </>
         ) : (
           <li>
-            <NavLink to="/login" role="button" className="outline">Login</NavLink>
+            <NavLink to="/login" role="button" className="outline">{t('nav.login')}</NavLink>
           </li>
         )}
       </ul>
@@ -74,22 +84,25 @@ function Navigation() {
 
 function App() {
   return (
-    <AuthProvider>
-      <BrowserRouter>
-        <div className="container">
-          <Navigation />
-          <main>
-            <Routes>
-              <Route path="/login" element={<Login />} />
-              <Route path="/" element={<ProtectedRoute><Search /></ProtectedRoute>} />
-              <Route path="/browse" element={<ProtectedRoute><Browse /></ProtectedRoute>} />
-              <Route path="/requests" element={<ProtectedRoute><Requests /></ProtectedRoute>} />
-              <Route path="/settings" element={<AdminRoute><Settings /></AdminRoute>} />
-            </Routes>
-          </main>
-        </div>
-      </BrowserRouter>
-    </AuthProvider>
+    <I18nProvider>
+      <AuthProvider>
+        <BrowserRouter>
+          <div className="container">
+            <Navigation />
+            <main>
+              <Routes>
+                <Route path="/login" element={<Login />} />
+                <Route path="/" element={<ProtectedRoute><Search /></ProtectedRoute>} />
+                <Route path="/book/:db/:id" element={<ProtectedRoute><BookDetail /></ProtectedRoute>} />
+                <Route path="/browse" element={<ProtectedRoute><Browse /></ProtectedRoute>} />
+                <Route path="/requests" element={<ProtectedRoute><Requests /></ProtectedRoute>} />
+                <Route path="/settings" element={<AdminRoute><Settings /></AdminRoute>} />
+              </Routes>
+            </main>
+          </div>
+        </BrowserRouter>
+      </AuthProvider>
+    </I18nProvider>
   )
 }
 

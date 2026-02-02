@@ -1,7 +1,10 @@
 import React, { useState, useEffect } from 'react'
+import { Link, useLocation } from 'react-router-dom'
 import { Book } from '../types'
 import { useAuth } from '../context/AuthContext'
 import { generateBibTeX, generateRIS } from '../utils/citation'
+import { SkeletonCard } from '../components/Skeletons'
+import { useI18n } from '../context/I18nContext'
 
 type QueryRow = {
   id: number
@@ -10,16 +13,6 @@ type QueryRow = {
   operator: string
 }
 
-const ATTRIBUTES = [
-  { value: '1016', label: 'Any' },
-  { value: '4', label: 'Title' },
-  { value: '1003', label: 'Author' },
-  { value: '7', label: 'ISBN' },
-  { value: '8', label: 'ISSN' },
-  { value: '21', label: 'Subject' },
-  { value: '31', label: 'Date' },
-]
-
 const OPERATORS = [
   { value: 'AND', label: 'AND' },
   { value: 'OR', label: 'OR' },
@@ -27,6 +20,21 @@ const OPERATORS = [
 ]
 
 export default function Search() {
+  const { t } = useI18n()
+  
+  const ATTRIBUTES = [
+    { value: '1016', label: t('search.attr.any') },
+    { value: '4', label: t('search.attr.title') },
+    { value: '1003', label: t('search.attr.author') },
+    { value: '7', label: t('search.attr.isbn') },
+    { value: '8', label: t('search.attr.issn') },
+    { value: '21', label: t('search.attr.subject') },
+    { value: '31', label: t('search.attr.date') },
+  ]
+
+  const [isAdvanced, setIsAdvanced] = useState(false)
+  const [simpleQuery, setSimpleQuery] = useState('')
+  
   const [rows, setRows] = useState<QueryRow[]>([
     { id: Date.now(), attribute: '1016', term: '', operator: 'AND' }
   ])
@@ -43,6 +51,7 @@ export default function Search() {
   const [citation, setCitation] = useState<{ content: string, format: string } | null>(null)
 
   const { token } = useAuth()
+  const location = useLocation()
 
   useEffect(() => {
     fetch('/api/targets', { headers: { 'Authorization': `Bearer ${token}` } })
@@ -50,11 +59,81 @@ export default function Search() {
       .then(data => {
         if (data.status === 'success' && data.data) {
           setTargets(data.data)
-          if (data.data.length > 0) setTargetDB(data.data[0])
+          // Only set default if no query param
+          if (!new URLSearchParams(location.search).get('db') && data.data.length > 0) {
+            setTargetDB(data.data[0])
+          }
         }
       })
       .catch(console.error)
   }, [token])
+
+  // Handle query params from Browse page
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    const term = params.get('term')
+    const attr = params.get('attr')
+    const db = params.get('db')
+
+    if (db) setTargetDB(db)
+
+    if (term) {
+      if (attr && attr !== '1016') {
+        // Switch to Advanced for specific attribute search
+        setIsAdvanced(true)
+        setRows([{ id: Date.now(), attribute: attr, term: term, operator: 'AND' }])
+        // Trigger search immediately
+        doSearch(db || 'LCDB', [{ attribute: attr, term: term, operator: 'AND' }])
+      } else {
+        // Simple search
+        setIsAdvanced(false)
+        setSimpleQuery(term)
+        doSearch(db || 'LCDB', null, term)
+      }
+    }
+  }, [location.search, token])
+
+  const doSearch = async (db: string, advancedRows?: any[], simpleTerm?: string) => {
+    setLoading(true)
+    setError('')
+    setResults([])
+    setRequestStatus(null)
+
+    try {
+      const params = new URLSearchParams()
+      params.append('db', db)
+      
+      if (advancedRows) {
+        advancedRows.forEach((row, index) => {
+          const i = index + 1
+          params.append(`term${i}`, row.term)
+          params.append(`attr${i}`, row.attribute)
+          if (i > 1) params.append(`op${i}`, row.operator)
+        })
+      } else if (simpleTerm) {
+        params.append('term1', simpleTerm)
+        params.append('attr1', '1016')
+      } else {
+        return // Nothing to search
+      }
+
+      const response = await fetch(`/api/search?${params.toString()}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      
+      if (!response.ok) throw new Error(`Error: ${response.statusText}`)
+      const data = await response.json()
+      if (data.error) throw new Error(data.error)
+      
+      const list = data.data || []
+      setResults(list)
+      if (list.length === 0) setError(t('search.no_results'))
+    } catch (err: any) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const addRow = () => {
     setRows([...rows, { id: Date.now(), attribute: '1016', term: '', operator: 'AND' }])
@@ -74,44 +153,10 @@ export default function Search() {
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault()
-    setLoading(true)
-    setError('')
-    setResults([])
-    setRequestStatus(null)
-
-    try {
-      const params = new URLSearchParams()
-      params.append('db', targetDB)
-      
-      rows.forEach((row, index) => {
-        const i = index + 1
-        params.append(`term${i}`, row.term)
-        params.append(`attr${i}`, row.attribute)
-        if (i > 1) {
-          params.append(`op${i}`, row.operator)
-        }
-      })
-
-      const response = await fetch(`/api/search?${params.toString()}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      })
-      
-      if (!response.ok) {
-        throw new Error(`Error: ${response.statusText}`)
-      }
-      
-      const data = await response.json()
-      if (data.error) throw new Error(data.error)
-      
-      const list = data.data || []
-      setResults(list)
-      if (list.length === 0) {
-        setError('No results found.')
-      }
-    } catch (err: any) {
-      setError(err.message)
-    } finally {
-      setLoading(false)
+    if (isAdvanced) {
+      doSearch(targetDB, rows)
+    } else {
+      doSearch(targetDB, null, simpleQuery)
     }
   }
 
@@ -137,9 +182,9 @@ export default function Search() {
         throw new Error(errData.error || 'Request failed')
       }
 
-      setRequestStatus({ msg: `Requested "${book.title}" from ${targetDB} successfully!`, type: 'success' })
+      setRequestStatus({ msg: t('detail.request_success', {title: book.title}), type: 'success' })
     } catch (err: any) {
-      setRequestStatus({ msg: `Failed to request: ${err.message}`, type: 'error' })
+      setRequestStatus({ msg: t('detail.request_fail', {error: err.message}), type: 'error' })
     }
   }
 
@@ -157,75 +202,112 @@ export default function Search() {
       <article>
         <header>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <strong>Advanced Search</strong>
-            <select 
-              value={targetDB} 
-              onChange={(e) => setTargetDB(e.target.value)}
-              style={{ width: 'auto', marginBottom: 0 }}
-            >
-              {targets.map(t => <option key={t} value={t}>{t}</option>)}
-              {targets.length === 0 && <option value="LCDB">LCDB</option>}
-            </select>
+            <div role="group">
+              <button 
+                className={!isAdvanced ? "" : "outline"} 
+                onClick={() => setIsAdvanced(false)}
+                style={{marginBottom: 0, fontSize: '0.9em', padding: '5px 15px'}}
+              >
+                {t('search.simple')}
+              </button>
+              <button 
+                className={isAdvanced ? "" : "outline"} 
+                onClick={() => setIsAdvanced(true)}
+                style={{marginBottom: 0, fontSize: '0.9em', padding: '5px 15px'}}
+              >
+                {t('search.advanced')}
+              </button>
+            </div>
+            
+            <div style={{display: 'flex', alignItems: 'center', gap: '10px'}}>
+              <small>{t('search.target')}</small>
+              <select 
+                value={targetDB} 
+                onChange={(e) => setTargetDB(e.target.value)}
+                style={{ width: 'auto', marginBottom: 0 }}
+              >
+                {targets.map(t => <option key={t} value={t}>{t}</option>)}
+                {targets.length === 0 && <option value="LCDB">LCDB</option>}
+              </select>
+            </div>
           </div>
         </header>
 
         <form onSubmit={handleSearch}>
-          {rows.map((row, index) => (
-            <div key={row.id} style={{ display: 'flex', gap: '10px', marginBottom: '10px', alignItems: 'center' }}>
-              {index > 0 && (
-                <select 
-                  value={row.operator} 
-                  onChange={(e) => updateRow(index, 'operator', e.target.value)}
-                  style={{ width: '100px', marginBottom: 0 }}
-                >
-                  {OPERATORS.map(op => <option key={op.value} value={op.value}>{op.label}</option>)}
-                </select>
-              )}
-              
-              <select 
-                value={row.attribute} 
-                onChange={(e) => updateRow(index, 'attribute', e.target.value)}
-                style={{ width: '150px', marginBottom: 0 }}
-              >
-                {ATTRIBUTES.map(attr => <option key={attr.value} value={attr.value}>{attr.label}</option>)}
-              </select>
-
+          {!isAdvanced ? (
+            <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
               <input 
-                type="text" 
-                placeholder="Search term..." 
-                value={row.term}
-                onChange={(e) => updateRow(index, 'term', e.target.value)}
+                type="search" 
+                placeholder={t('search.placeholder')} 
+                value={simpleQuery}
+                onChange={(e) => setSimpleQuery(e.target.value)}
                 required
-                style={{ flexGrow: 1, marginBottom: 0 }}
+                style={{ flexGrow: 1, marginBottom: 0, fontSize: '1.1em', padding: '12px' }}
               />
-
-              {rows.length > 1 && (
-                <button 
-                  type="button" 
-                  className="secondary outline" 
-                  onClick={() => removeRow(index)}
-                  style={{ width: 'auto', marginBottom: 0, padding: '10px' }}
-                >
-                  ✕
-                </button>
-              )}
+              <button type="submit" disabled={loading} style={{fontSize: '1.1em', padding: '12px 30px'}}>
+                {loading ? '...' : t('search.button')}
+              </button>
             </div>
-          ))}
+          ) : (
+            <>
+              {rows.map((row, index) => (
+                <div key={row.id} style={{ display: 'flex', gap: '10px', marginBottom: '10px', alignItems: 'center' }}>
+                  {index > 0 && (
+                    <select 
+                      value={row.operator} 
+                      onChange={(e) => updateRow(index, 'operator', e.target.value)}
+                      style={{ width: '100px', marginBottom: 0 }}
+                    >
+                      {OPERATORS.map(op => <option key={op.value} value={op.value}>{op.label}</option>)}
+                    </select>
+                  )}
+                  
+                  <select 
+                    value={row.attribute} 
+                    onChange={(e) => updateRow(index, 'attribute', e.target.value)}
+                    style={{ width: '150px', marginBottom: 0 }}
+                  >
+                    {ATTRIBUTES.map(attr => <option key={attr.value} value={attr.value}>{attr.label}</option>)}
+                  </select>
 
-          <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
-            <button type="button" className="secondary" onClick={addRow}>
-              + Add Condition
-            </button>
-            <button type="submit" disabled={loading}>
-              {loading ? 'Searching...' : 'Search'}
-            </button>
-          </div>
+                  <input 
+                    type="text" 
+                    placeholder={t('search.term_placeholder')}
+                    value={row.term}
+                    onChange={(e) => updateRow(index, 'term', e.target.value)}
+                    required
+                    style={{ flexGrow: 1, marginBottom: 0 }}
+                  />
+
+                  {rows.length > 1 && (
+                    <button 
+                      type="button" 
+                      className="secondary outline" 
+                      onClick={() => removeRow(index)}
+                      style={{ width: 'auto', marginBottom: 0, padding: '10px' }}
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+              ))}
+
+              <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
+                <button type="button" className="secondary" onClick={addRow}>
+                  +
+                </button>
+                <button type="submit" disabled={loading}>
+                  {loading ? '...' : t('search.button')}
+                </button>
+              </div>
+            </>
+          )}
         </form>
       </article>
 
       {error && (
         <article className="pico-background-red-200">
-          <strong>Message:</strong> {error}
+          <strong>{t('search.error')}:</strong> {error}
         </article>
       )}
 
@@ -235,32 +317,42 @@ export default function Search() {
         </article>
       )}
 
-      {results.length > 0 && (
+      {loading ? (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: '20px' }}>
+          {[1, 2, 3, 4].map(i => <SkeletonCard key={i} />)}
+        </div>
+      ) : results.length > 0 ? (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: '20px' }}>
           {results.map((item, index) => (
             <article key={index}>
               <div style={{ display: 'flex', gap: '20px', alignItems: 'flex-start' }}>
                 <div style={{ flexShrink: 0 }}>
-                  <img 
-                    src={item.isbn 
-                      ? `https://covers.openlibrary.org/b/isbn/${cleanISBN(item.isbn)}-M.jpg?default=https://placehold.co/100x150/e0e0e0/808080?text=No+Cover`
-                      : 'https://placehold.co/100x150/e0e0e0/808080?text=No+ISBN'
-                    }
-                    alt="Book Cover"
-                    style={{ 
-                      width: '100px', 
-                      height: '150px', 
-                      objectFit: 'cover',
-                      borderRadius: '4px',
-                      border: '1px solid #ddd'
-                    }}
-                    loading="lazy"
-                  />
+                  <Link to={`/book/${targetDB}/${encodeURIComponent(item.record_id || '')}`}>
+                    <img 
+                      src={item.isbn 
+                        ? `https://covers.openlibrary.org/b/isbn/${cleanISBN(item.isbn)}-M.jpg?default=https://placehold.co/100x150/e0e0e0/808080?text=No+Cover`
+                        : 'https://placehold.co/100x150/e0e0e0/808080?text=No+ISBN'
+                      }
+                      alt="Book Cover"
+                      style={{ 
+                        width: '100px', 
+                        height: '150px', 
+                        objectFit: 'cover',
+                        borderRadius: '4px',
+                        border: '1px solid #ddd'
+                      }}
+                      loading="lazy"
+                    />
+                  </Link>
                 </div>
                 
                 <div style={{ flexGrow: 1 }}>
                   <header style={{ marginBottom: '10px' }}>
-                    <strong>{item.title || 'Untitled'}</strong>
+                    <strong>
+                      <Link to={`/book/${targetDB}/${encodeURIComponent(item.record_id || '')}`} style={{textDecoration: 'none', color: 'inherit'}}>
+                        {item.title || 'Untitled'}
+                      </Link>
+                    </strong>
                   </header>
                   <p style={{ marginBottom: '5px' }}><strong>Author:</strong> {item.author || 'Unknown'}</p>
                   <p style={{ marginBottom: '5px' }}><strong>ISBN:</strong> {item.isbn || 'Unknown'}</p>
@@ -318,7 +410,7 @@ export default function Search() {
             </article>
           ))}
         </div>
-      )}
+      ) : null}
 
       {/* Citation Modal */}
       {citation && (

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { ILLRequest } from '../types'
 import { useAuth } from '../context/AuthContext'
+import { SkeletonRow } from '../components/Skeletons'
 
 export default function Requests() {
   const [illRequests, setILLRequests] = useState<ILLRequest[]>([])
@@ -77,7 +78,25 @@ export default function Requests() {
         </article>
       )}
 
-      {loading ? <p aria-busy="true">Loading...</p> : (
+      {loading ? (
+        <figure>
+          <table role="grid">
+            <thead>
+              <tr>
+                <th scope="col">ID</th>
+                <th scope="col">Library/Target</th>
+                <th scope="col">Book Information</th>
+                <th scope="col">Status</th>
+                {user?.role === 'admin' && <th scope="col">Requestor</th>}
+                {user?.role === 'admin' && <th scope="col">Actions</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {[1, 2, 3].map(i => <SkeletonRow key={i} />)}
+            </tbody>
+          </table>
+        </figure>
+      ) : (
         <figure>
           <table role="grid">
             <thead>

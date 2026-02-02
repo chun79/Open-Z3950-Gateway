@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 
 interface ScanResult {
   term: string
   count: number
 }
+
+const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("")
 
 export default function Browse() {
   const [term, setTerm] = useState('')
@@ -16,6 +19,7 @@ export default function Browse() {
   const [targetDB, setTargetDB] = useState('LCDB')
   const [scanField, setScanField] = useState('title')
   const { token } = useAuth()
+  const navigate = useNavigate()
 
   useEffect(() => {
     fetch('/api/targets', { headers: { 'Authorization': `Bearer ${token}` } })
@@ -29,14 +33,13 @@ export default function Browse() {
       .catch(console.error)
   }, [token])
 
-  const handleScan = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const executeScan = async (scanTerm: string) => {
     setLoading(true)
     setError('')
     setResults([])
 
     try {
-      const response = await fetch(`/api/scan?term=${encodeURIComponent(term)}&db=${encodeURIComponent(targetDB)}&field=${encodeURIComponent(scanField)}`, {
+      const response = await fetch(`/api/scan?term=${encodeURIComponent(scanTerm)}&db=${encodeURIComponent(targetDB)}&field=${encodeURIComponent(scanField)}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       })
       if (!response.ok) {
@@ -52,54 +55,81 @@ export default function Browse() {
     }
   }
 
-  const navigateToSearch = (searchTerm: string) => {
-    // Navigate to Search page with pre-filled query
-    // Simple way: redirect with query params. 
-    // But our Search component uses internal state.
-    // For now, let's just open a new tab or log.
-    // Ideally, pass params via router state.
-    window.location.href = `/?query=${encodeURIComponent(searchTerm)}&field=${scanField}`
+  const handleFormSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    executeScan(term)
+  }
+
+  const handleAlphaClick = (letter: string) => {
+    setTerm(letter)
+    executeScan(letter)
+  }
+
+  const handleTermClick = (item: ScanResult) => {
+    // Map scan field to search attribute
+    // Title -> 4, Author -> 1003, Subject -> 21
+    let attr = '4'
+    if (scanField === 'author') attr = '1003'
+    if (scanField === 'subject') attr = '21'
+    
+    // Navigate to Search with query params
+    // We need to update Search.tsx to read these params on mount
+    navigate(`/?term=${encodeURIComponent(item.term)}&attr=${attr}&db=${targetDB}`)
   }
 
   return (
     <>
       <article>
-        <header><strong>Browse Index (Scan)</strong></header>
-        <form onSubmit={handleScan}>
-          <fieldset role="group">
-            <select 
-              value={scanField} 
-              onChange={(e) => setScanField(e.target.value)}
-              style={{ width: '150px' }}
-              aria-label="Scan Field"
-            >
-              <option value="title">Title</option>
-              <option value="author">Author</option>
-              <option value="subject">Subject</option>
-            </select>
-            <input 
-              type="text" 
-              name="term" 
-              placeholder="Enter Start Term (e.g., Shakes)" 
-              value={term}
-              onChange={(e) => setTerm(e.target.value)}
-              required
-              style={{ flexGrow: 2 }} 
-            />
+        <header>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <strong>Browse Index</strong>
             <select 
               value={targetDB} 
               onChange={(e) => setTargetDB(e.target.value)}
-              style={{ flexGrow: 1 }}
-              aria-label="Select Target Library"
+              style={{ width: 'auto', marginBottom: 0 }}
             >
               {targets.map(t => <option key={t} value={t}>{t}</option>)}
               {targets.length === 0 && <option value="LCDB">LCDB</option>}
             </select>
+          </div>
+        </header>
+
+        <form onSubmit={handleFormSubmit}>
+          <div className="grid">
+            <select 
+              value={scanField} 
+              onChange={(e) => setScanField(e.target.value)}
+              aria-label="Scan Field"
+            >
+              <option value="title">By Title</option>
+              <option value="author">By Author</option>
+              <option value="subject">By Subject</option>
+            </select>
+            <input 
+              type="text" 
+              placeholder={`Enter start of ${scanField}...`} 
+              value={term}
+              onChange={(e) => setTerm(e.target.value)}
+              required
+            />
             <button type="submit" disabled={loading}>
               {loading ? 'Scanning...' : 'Scan'}
             </button>
-          </fieldset>
+          </div>
         </form>
+
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', justifyContent: 'center', marginTop: '10px' }}>
+          {ALPHABET.map(char => (
+            <button 
+              key={char} 
+              className="outline secondary" 
+              style={{ padding: '5px 10px', fontSize: '0.8em', marginBottom: 0 }}
+              onClick={() => handleAlphaClick(char)}
+            >
+              {char}
+            </button>
+          ))}
+        </div>
       </article>
 
       {error && (
@@ -109,36 +139,22 @@ export default function Browse() {
       )}
 
       {results.length > 0 && (
-        <article>
-          <figure>
-            <table>
-              <thead>
-                <tr>
-                  <th scope="col">Term</th>
-                  <th scope="col">Count</th>
-                  <th scope="col">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {results.map((item, index) => (
-                  <tr key={index}>
-                    <td>{item.term}</td>
-                    <td>{item.count}</td>
-                    <td>
-                      <a href={`/?term1=${encodeURIComponent(item.term)}&attr1=${scanField === 'title' ? 4 : scanField === 'author' ? 1003 : 21}&db=${targetDB}`}>
-                        Search
-                      </a>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </figure>
-        </article>
+        <div className="grid">
+          {results.map((item, index) => (
+            <article key={index} className="scan-card" onClick={() => handleTermClick(item)} style={{ cursor: 'pointer', marginBottom: '10px' }}>
+              <header style={{ padding: '10px' }}>
+                <strong>{item.term}</strong>
+              </header>
+              <div style={{ padding: '0 10px 10px' }}>
+                <small>Records found: <mark>{item.count}</mark></small>
+              </div>
+            </article>
+          ))}
+        </div>
       )}
       
       {results.length === 0 && !loading && !error && term && (
-        <p>No index entries found.</p>
+        <p style={{ textAlign: 'center', marginTop: '20px' }}>No index entries found starting with "{term}".</p>
       )}
     </>
   )
