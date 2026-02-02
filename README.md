@@ -46,6 +46,8 @@ graph TD
     Proxy -->|TCP/Z39.50| Harvard[Harvard University]
 ```
 
+For detailed technical specifications of the Z39.50 implementation (PDUs, OIDs, Attributes), see [docs/PROTOCOL.md](docs/PROTOCOL.md).
+
 ## 🚀 Quick Start
 
 ### Docker (Recommended)
