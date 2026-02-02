@@ -1,0 +1,237 @@
+package provider
+
+import (
+	"fmt"
+	"log/slog"
+	"math/rand"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/yourusername/open-z3950-gateway/pkg/z3950"
+)
+
+// TargetConfig holds connection details for a remote Z39.50 server
+type TargetConfig struct {
+	Host         string
+	Port         int
+	DatabaseName string
+	Encoding     string // "MARC21", "UNIMARC", "SUTRS"
+}
+
+type TargetResolver interface {
+	GetTargetByName(name string) (*Target, error)
+}
+
+type ProxyProvider struct {
+	resolver   TargetResolver
+	queryCache sync.Map
+}
+
+func NewProxyProvider(resolver TargetResolver) *ProxyProvider {
+	return &ProxyProvider{
+		resolver: resolver,
+	}
+}
+
+// connectToTarget connects and initializes a session
+func (p *ProxyProvider) connectToTarget(targetName string) (*z3950.Client, TargetConfig, error) {
+	// Resolve target from DB
+	t, err := p.resolver.GetTargetByName(targetName)
+	if err != nil {
+		return nil, TargetConfig{}, fmt.Errorf("unknown target: %s (%w)", targetName, err)
+	}
+
+	config := TargetConfig{
+		Host:         t.Host,
+		Port:         t.Port,
+		DatabaseName: t.DatabaseName,
+		Encoding:     t.Encoding,
+	}
+
+	client := z3950.NewClient(config.Host, config.Port)
+	if err := client.Connect(); err != nil {
+		return nil, config, fmt.Errorf("failed to connect to %s: %w", targetName, err)
+	}
+
+	if err := client.Init(); err != nil {
+		client.Close()
+		return nil, config, fmt.Errorf("failed to init connection to %s: %w", targetName, err)
+	}
+	
+	return client, config, nil
+}
+
+// executeRemoteSearch connects, initializes, searches, and returns the client, count AND config.
+func (p *ProxyProvider) executeRemoteSearch(targetName string, query z3950.StructuredQuery) (*z3950.Client, int, TargetConfig, error) {
+	client, config, err := p.connectToTarget(targetName)
+	if err != nil {
+		return nil, 0, config, err
+	}
+
+	count, err := client.StructuredSearch(config.DatabaseName, query)
+	if err != nil {
+		client.Close()
+		return nil, 0, config, fmt.Errorf("remote search failed on %s: %w", targetName, err)
+	}
+
+	return client, count, config, nil
+}
+
+func (p *ProxyProvider) Search(db string, query z3950.StructuredQuery) ([]string, error) {
+	client, count, _, err := p.executeRemoteSearch(db, query)
+	if err != nil {
+		return nil, err
+	}
+	defer client.Close()
+
+	if count > 20 {
+		count = 20
+	}
+
+	// Generate a unique session ID for this search result set
+	sessionID := fmt.Sprintf("%d-%d", time.Now().UnixNano(), rand.Intn(100000))
+	p.queryCache.Store(sessionID, query)
+
+	ids := make([]string, count)
+	for i := 0; i < count; i++ {
+		// Return IDs in format "sessionID:index"
+		ids[i] = fmt.Sprintf("%s:%d", sessionID, i+1)
+	}
+	
+	return ids, nil
+}
+
+func (p *ProxyProvider) Fetch(db string, ids []string) ([]*z3950.MARCRecord, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	// Parse the first ID to get the sessionID
+	parts := strings.Split(ids[0], ":")
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("invalid id format")
+	}
+	sessionID := parts[0]
+
+	val, ok := p.queryCache.Load(sessionID)
+	if !ok {
+		return nil, fmt.Errorf("session expired or unknown query for db: %s", db)
+	}
+	query := val.(z3950.StructuredQuery)
+
+	client, _, config, err := p.executeRemoteSearch(db, query)
+	if err != nil {
+		return nil, err
+	}
+	defer client.Close()
+
+	// Determine Syntax OID
+	syntaxOID := z3950.OID_MARC21
+	if config.Encoding == "UNIMARC" {
+		syntaxOID = z3950.OID_UNIMARC
+	} else if config.Encoding == "SUTRS" {
+		syntaxOID = z3950.OID_SUTRS
+	}
+
+	var records []*z3950.MARCRecord
+	for _, id := range ids {
+		parts := strings.Split(id, ":")
+		if len(parts) != 2 {
+			continue
+		}
+		idx, err := strconv.Atoi(parts[1])
+		if err != nil {
+			continue
+		}
+		
+		recs, err := client.Present(idx, 1, syntaxOID)
+		if err != nil {
+			slog.Warn("failed to fetch record", "db", db, "index", idx, "error", err)
+			continue
+		}
+		if len(recs) > 0 {
+			records = append(records, recs[0])
+		}
+	}
+
+	return records, nil
+}
+
+func (p *ProxyProvider) Scan(db, field, startTerm string) ([]ScanResult, error) {
+	client, config, err := p.connectToTarget(db)
+	if err != nil {
+		return nil, err
+	}
+	defer client.Close()
+
+	// Map field string to Bib-1 Use Attribute
+	attrs := make(map[int]int)
+	switch field {
+	case "author":
+		attrs[1] = 1003
+	case "subject":
+		attrs[1] = 21
+	case "isbn":
+		attrs[1] = 7
+	case "issn":
+		attrs[1] = 8
+	case "title":
+		attrs[1] = 4
+	default:
+		attrs[1] = 4 // Default to Title
+	}
+
+	entries, err := client.Scan(config.DatabaseName, startTerm, attrs)
+	if err != nil {
+		return nil, fmt.Errorf("remote scan failed: %w", err)
+	}
+
+	results := make([]ScanResult, len(entries))
+	for i, entry := range entries {
+		results[i] = ScanResult{
+			Term:  entry.Term,
+			Count: entry.Count,
+		}
+	}
+
+	return results, nil
+}
+
+// Stub implementations for unsupported methods
+func (p *ProxyProvider) CreateILLRequest(req ILLRequest) error {
+	return fmt.Errorf("proxy provider does not support creating ILL requests locally")
+}
+
+func (p *ProxyProvider) ListILLRequests() ([]ILLRequest, error) {
+	return []ILLRequest{}, nil
+}
+
+func (p *ProxyProvider) UpdateILLRequestStatus(id int64, status string) error {
+	return fmt.Errorf("proxy provider does not support updating ILL requests")
+}
+
+func (p *ProxyProvider) CreateUser(user *User) error {
+	return fmt.Errorf("proxy provider does not support user management")
+}
+
+func (p *ProxyProvider) GetUserByUsername(username string) (*User, error) {
+	return nil, fmt.Errorf("user not found in proxy provider")
+}
+
+func (p *ProxyProvider) CreateTarget(target *Target) error {
+	return fmt.Errorf("proxy provider does not support managing targets")
+}
+
+func (p *ProxyProvider) ListTargets() ([]Target, error) {
+	return []Target{}, nil
+}
+
+func (p *ProxyProvider) DeleteTarget(id int64) error {
+	return fmt.Errorf("proxy provider does not support managing targets")
+}
+
+func (p *ProxyProvider) GetTargetByName(name string) (*Target, error) {
+	return nil, fmt.Errorf("proxy provider does not store targets")
+}
