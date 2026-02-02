@@ -11,13 +11,14 @@ RUN npm run build
 # Stage 2: Build Backend (with embedded frontend)
 FROM golang:1.24-alpine AS backend-builder
 WORKDIR /src
+RUN apk add --no-cache build-base
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 # Copy the compiled frontend assets from the previous stage to the location Go expects
 COPY --from=frontend-builder /app/dist ./pkg/ui/dist
 # Build the binary
-RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/gateway ./cmd/gateway
+RUN CGO_ENABLED=1 GOOS=linux go build -o /bin/gateway ./cmd/gateway
 
 # Stage 3: Final Runtime Image
 FROM alpine:latest
