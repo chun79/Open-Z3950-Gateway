@@ -34,7 +34,7 @@ func main() {
 	fmt.Printf("Searching for '%s' in %s...\n", term, dbName)
 	query := z3950.StructuredQuery{
 		Root: z3950.QueryClause{
-			Attribute: z3950.UseAttributeTitle, // 4
+			Attribute: z3950.UseAttributeAny, // 1016
 			Term:      term,
 		},
 	}
