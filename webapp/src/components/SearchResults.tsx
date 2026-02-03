@@ -58,12 +58,12 @@ export function SearchResults({ results, loading, targetDB, onRequest, onCite }:
               <header style={{ marginBottom: '10px' }}>
                 <strong>
                   <Link to={`/book/${targetDB}/${encodeURIComponent(item.record_id || '')}`} style={{textDecoration: 'none', color: 'inherit'}}>
-                    {item.title || 'Untitled'}
+                    {item.title || t('common.untitled')}
                   </Link>
                 </strong>
               </header>
-              <p style={{ marginBottom: '5px' }}><strong>{t('search.attr.author')}:</strong> {item.author || 'Unknown'}</p>
-              <p style={{ marginBottom: '5px' }}><strong>{t('search.attr.isbn')}:</strong> {item.isbn || 'Unknown'}</p>
+              <p style={{ marginBottom: '5px' }}><strong>{t('search.attr.author')}:</strong> {item.author || t('common.unknown')}</p>
+              <p style={{ marginBottom: '5px' }}><strong>{t('search.attr.isbn')}:</strong> {item.isbn || t('common.unknown')}</p>
               {item.issn && <p style={{ marginBottom: '5px' }}><strong>{t('search.attr.issn')}:</strong> {item.issn}</p>}
               {item.subject && <p style={{ marginBottom: '5px' }}><strong>{t('search.attr.subject')}:</strong> {item.subject}</p>}
               {item.publisher && <p style={{ marginBottom: '5px' }}><strong>{t('detail.publisher')}:</strong> {item.publisher}</p>}

@@ -99,5 +99,13 @@
   "login.no_account": "还没有账号？",
   "login.has_account": "已有账号？",
   "login.link_register": "点击注册",
-  "login.link_login": "点击登录"
+  "login.link_login": "点击登录",
+
+  "common.untitled": "无标题",
+  "common.unknown": "未知",
+  "common.access_denied": "访问拒绝：仅限管理员",
+
+  "search.op.and": "并且 (AND)",
+  "search.op.or": "或者 (OR)",
+  "search.op.not": "不包含 (NOT)"
 }

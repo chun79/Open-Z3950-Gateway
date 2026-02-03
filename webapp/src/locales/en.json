@@ -99,5 +99,13 @@
   "login.no_account": "Don't have an account?",
   "login.has_account": "Already have an account?",
   "login.link_register": "Register here",
-  "login.link_login": "Login here"
+  "login.link_login": "Login here",
+
+  "common.untitled": "Untitled",
+  "common.unknown": "Unknown",
+  "common.access_denied": "Access Denied: Admins only",
+  
+  "search.op.and": "AND",
+  "search.op.or": "OR",
+  "search.op.not": "NOT"
 }

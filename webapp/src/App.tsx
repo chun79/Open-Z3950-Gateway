@@ -18,11 +18,12 @@ function ProtectedRoute({ children }: { children: JSX.Element }) {
 
 function AdminRoute({ children }: { children: JSX.Element }) {
   const { isAuthenticated, user } = useAuth();
+  const { t } = useI18n();
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
   }
   if (user?.role !== 'admin') {
-    return <div>Access Denied: Admins only</div>;
+    return <div>{t('common.access_denied')}</div>;
   }
   return children;
 }

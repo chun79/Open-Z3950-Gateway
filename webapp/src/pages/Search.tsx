@@ -22,12 +22,6 @@ type SearchHistoryItem = {
   summary: string
 }
 
-const OPERATORS = [
-  { value: 'AND', label: 'AND' },
-  { value: 'OR', label: 'OR' },
-  { value: 'AND-NOT', label: 'NOT' },
-]
-
 export default function Search() {
   const { t } = useI18n()
   
@@ -62,6 +56,12 @@ export default function Search() {
 
   // Citation Modal State
   const [citation, setCitation] = useState<{ content: string, format: string } | null>(null)
+
+  const OPERATORS = [
+    { value: 'AND', label: t('search.op.and') },
+    { value: 'OR', label: t('search.op.or') },
+    { value: 'AND-NOT', label: t('search.op.not') },
+  ]
 
   const { token } = useAuth()
   const location = useLocation()
