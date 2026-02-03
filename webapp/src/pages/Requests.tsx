@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { ILLRequest } from '../types'
 import { useAuth } from '../context/AuthContext'
+import { useI18n } from '../context/I18nContext'
 import { SkeletonRow } from '../components/Skeletons'
 
 export default function Requests() {
@@ -8,6 +9,7 @@ export default function Requests() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const { token, user } = useAuth()
+  const { t } = useI18n()
 
   const fetchILLRequests = async () => {
     setLoading(true)
@@ -55,26 +57,26 @@ export default function Requests() {
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'approved':
-        return <mark style={{ backgroundColor: '#d4edda', color: '#155724', padding: '2px 8px', borderRadius: '4px' }}>✅ Approved</mark>
+        return <mark style={{ backgroundColor: '#d4edda', color: '#155724', padding: '2px 8px', borderRadius: '4px' }}>✅ {t('requests.status.approved')}</mark>
       case 'rejected':
-        return <mark style={{ backgroundColor: '#f8d7da', color: '#721c24', padding: '2px 8px', borderRadius: '4px' }}>❌ Rejected</mark>
+        return <mark style={{ backgroundColor: '#f8d7da', color: '#721c24', padding: '2px 8px', borderRadius: '4px' }}>❌ {t('requests.status.rejected')}</mark>
       default:
-        return <mark style={{ backgroundColor: '#fff3cd', color: '#856404', padding: '2px 8px', borderRadius: '4px' }}>⏳ Pending</mark>
+        return <mark style={{ backgroundColor: '#fff3cd', color: '#856404', padding: '2px 8px', borderRadius: '4px' }}>⏳ {t('requests.status.pending')}</mark>
     }
   }
 
   return (
     <article>
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <strong>Inter-Library Loan Requests</strong>
+        <strong>{t('requests.title')}</strong>
         <button className="outline secondary" onClick={fetchILLRequests} style={{ width: 'auto', marginBottom: 0 }}>
-          Refresh
+          {t('requests.refresh')}
         </button>
       </header>
       
       {error && (
         <article className="pico-background-red-200">
-          <strong>❌ Error:</strong> {error}
+          <strong>❌ {t('search.error')}:</strong> {error}
         </article>
       )}
 
@@ -83,12 +85,12 @@ export default function Requests() {
           <table role="grid">
             <thead>
               <tr>
-                <th scope="col">ID</th>
-                <th scope="col">Library/Target</th>
-                <th scope="col">Book Information</th>
-                <th scope="col">Status</th>
-                {user?.role === 'admin' && <th scope="col">Requestor</th>}
-                {user?.role === 'admin' && <th scope="col">Actions</th>}
+                <th scope="col">{t('requests.col.id')}</th>
+                <th scope="col">{t('requests.col.target')}</th>
+                <th scope="col">{t('requests.col.info')}</th>
+                <th scope="col">{t('requests.col.status')}</th>
+                {user?.role === 'admin' && <th scope="col">{t('requests.col.requestor')}</th>}
+                {user?.role === 'admin' && <th scope="col">{t('requests.col.actions')}</th>}
               </tr>
             </thead>
             <tbody>
@@ -101,17 +103,17 @@ export default function Requests() {
           <table role="grid">
             <thead>
               <tr>
-                <th scope="col">ID</th>
-                <th scope="col">Library/Target</th>
-                <th scope="col">Book Information</th>
-                <th scope="col">Status</th>
-                {user?.role === 'admin' && <th scope="col">Requestor</th>}
-                {user?.role === 'admin' && <th scope="col">Actions</th>}
+                <th scope="col">{t('requests.col.id')}</th>
+                <th scope="col">{t('requests.col.target')}</th>
+                <th scope="col">{t('requests.col.info')}</th>
+                <th scope="col">{t('requests.col.status')}</th>
+                {user?.role === 'admin' && <th scope="col">{t('requests.col.requestor')}</th>}
+                {user?.role === 'admin' && <th scope="col">{t('requests.col.actions')}</th>}
               </tr>
             </thead>
             <tbody>
               {illRequests.length === 0 ? (
-                <tr><td colSpan={user?.role === 'admin' ? 6 : 4} style={{ textAlign: 'center' }}>No requests found.</td></tr>
+                <tr><td colSpan={user?.role === 'admin' ? 6 : 4} style={{ textAlign: 'center' }}>{t('requests.empty')}</td></tr>
               ) : (
                 illRequests.map((req, idx) => (
                   <tr key={idx}>
@@ -127,8 +129,8 @@ export default function Requests() {
                       <td>
                         {req.status === 'pending' && (
                           <div role="group">
-                            <button className="outline" onClick={() => handleStatusUpdate(req.id, 'approved')} style={{ padding: '5px 10px', fontSize: '0.8em' }}>Approve</button>
-                            <button className="outline secondary" onClick={() => handleStatusUpdate(req.id, 'rejected')} style={{ padding: '5px 10px', fontSize: '0.8em' }}>Reject</button>
+                            <button className="outline" onClick={() => handleStatusUpdate(req.id, 'approved')} style={{ padding: '5px 10px', fontSize: '0.8em' }}>{t('requests.action.approve')}</button>
+                            <button className="outline secondary" onClick={() => handleStatusUpdate(req.id, 'rejected')} style={{ padding: '5px 10px', fontSize: '0.8em' }}>{t('requests.action.reject')}</button>
                           </div>
                         )}
                       </td>

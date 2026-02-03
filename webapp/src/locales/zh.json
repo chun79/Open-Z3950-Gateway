@@ -24,6 +24,15 @@
   "search.attr.issn": "ISSN",
   "search.attr.subject": "主题",
   "search.attr.date": "出版日期",
+  "search.result.holdings": "馆藏信息",
+  "search.result.location": "馆藏地",
+  "search.result.call_number": "索书号",
+  "search.result.status": "状态",
+  "search.action.request": "申请借阅",
+  "search.action.bibtex": "BibTeX",
+  "search.action.ris": "RIS",
+  "search.action.copy": "复制到剪贴板",
+  "search.citation.title": "{format} 引用格式",
   
   "browse.title": "索引浏览",
   "browse.by_title": "按题名",
@@ -80,8 +89,15 @@
   "settings.add.submit": "添加目标",
 
   "login.title": "登录系统",
+  "login.register_title": "注册账号",
   "login.username": "用户名",
   "login.password": "密码",
   "login.submit": "登录",
-  "login.register_link": "注册新账号"
+  "login.register_submit": "注册",
+  "login.register_link": "注册新账号",
+  "login.success": "注册成功！请登录。",
+  "login.no_account": "还没有账号？",
+  "login.has_account": "已有账号？",
+  "login.link_register": "点击注册",
+  "login.link_login": "点击登录"
 }

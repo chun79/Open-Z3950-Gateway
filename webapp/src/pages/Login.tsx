@@ -1,19 +1,23 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useI18n } from '../context/I18nContext';
 
 export default function Login() {
   const [isLogin, setIsLogin] = useState(true);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
+  const { t } = useI18n();
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setSuccess('');
     setLoading(true);
 
     const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register';
@@ -37,7 +41,9 @@ export default function Login() {
       } else {
         // After register, switch to login
         setIsLogin(true);
-        setError('Registration successful! Please login.');
+        setSuccess(t('login.success'));
+        setUsername('');
+        setPassword('');
       }
     } catch (err: any) {
       setError(err.message);
@@ -46,12 +52,19 @@ export default function Login() {
     }
   };
 
+  const toggleMode = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsLogin(!isLogin);
+    setError('');
+    setSuccess('');
+  }
+
   return (
     <article style={{ maxWidth: '400px', margin: '2rem auto' }}>
-      <header><strong>{isLogin ? 'Login' : 'Register'}</strong></header>
+      <header><strong>{isLogin ? t('login.title') : t('login.register_title')}</strong></header>
       <form onSubmit={handleSubmit}>
         <label>
-          Username
+          {t('login.username')}
           <input
             type="text"
             value={username}
@@ -60,7 +73,7 @@ export default function Login() {
           />
         </label>
         <label>
-          Password
+          {t('login.password')}
           <input
             type="password"
             value={password}
@@ -69,17 +82,18 @@ export default function Login() {
           />
         </label>
         
-        {error && <p style={{ color: 'var(--pico-color-red-500)' }}>{error}</p>}
+        {error && <p className="pico-color-red-500" style={{ marginBottom: '10px' }}>❌ {error}</p>}
+        {success && <p className="pico-color-green-500" style={{ marginBottom: '10px' }}>✅ {success}</p>}
 
         <button type="submit" aria-busy={loading}>
-          {isLogin ? 'Login' : 'Register'}
+          {isLogin ? t('login.submit') : t('login.register_submit')}
         </button>
       </form>
       <footer>
         <small>
-          {isLogin ? "Don't have an account? " : "Already have an account? "}
-          <a href="#" onClick={(e) => { e.preventDefault(); setIsLogin(!isLogin); setError(''); }}>
-            {isLogin ? 'Register here' : 'Login here'}
+          {isLogin ? t('login.no_account') : t('login.has_account')}{' '}
+          <a href="#" onClick={toggleMode}>
+            {isLogin ? t('login.link_register') : t('login.link_login')}
           </a>
         </small>
       </footer>

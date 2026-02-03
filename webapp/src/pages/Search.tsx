@@ -363,13 +363,13 @@ export default function Search() {
 
                   {item.holdings && item.holdings.length > 0 && (
                     <div style={{ marginTop: '10px', borderTop: '1px solid #eee', paddingTop: '10px' }}>
-                      <small><strong>Holdings:</strong></small>
+                      <small><strong>{t('search.result.holdings')}:</strong></small>
                       <table style={{ fontSize: '0.85em', marginBottom: 0 }}>
                         <thead>
                           <tr>
-                            <th>Location</th>
-                            <th>Call Number</th>
-                            <th>Status</th>
+                            <th>{t('search.result.location')}</th>
+                            <th>{t('search.result.call_number')}</th>
+                            <th>{t('search.result.status')}</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -397,13 +397,13 @@ export default function Search() {
               <footer style={{ marginTop: '15px' }}>
                 <div role="group" style={{ marginBottom: 0 }}>
                   <button onClick={() => handleILLRequest(item)}>
-                    Request
+                    {t('search.action.request')}
                   </button>
                   <button className="secondary outline" onClick={() => showCite(item, 'BibTeX')}>
-                    BibTeX
+                    {t('search.action.bibtex')}
                   </button>
                   <button className="secondary outline" onClick={() => showCite(item, 'RIS')}>
-                    RIS
+                    {t('search.action.ris')}
                   </button>
                 </div>
               </footer>
@@ -418,7 +418,7 @@ export default function Search() {
           <article>
             <header>
               <button aria-label="Close" rel="prev" onClick={() => setCitation(null)}></button>
-              <strong>Cite in {citation.format}</strong>
+              <strong>{t('search.citation.title').replace('{format}', citation.format)}</strong>
             </header>
             <pre style={{ backgroundColor: '#f4f4f4', padding: '10px', borderRadius: '5px' }}>
               {citation.content}
@@ -430,7 +430,7 @@ export default function Search() {
                   setCitation(null)
                 }}
               >
-                Copy to Clipboard
+                {t('search.action.copy')}
               </button>
             </footer>
           </article>

@@ -24,6 +24,15 @@
   "search.attr.issn": "ISSN",
   "search.attr.subject": "Subject",
   "search.attr.date": "Date",
+  "search.result.holdings": "Holdings",
+  "search.result.location": "Location",
+  "search.result.call_number": "Call Number",
+  "search.result.status": "Status",
+  "search.action.request": "Request",
+  "search.action.bibtex": "BibTeX",
+  "search.action.ris": "RIS",
+  "search.action.copy": "Copy to Clipboard",
+  "search.citation.title": "Cite in {format}",
 
   "browse.title": "Browse Index",
   "browse.by_title": "By Title",
@@ -80,8 +89,15 @@
   "settings.add.submit": "Add Target",
 
   "login.title": "Login",
+  "login.register_title": "Register",
   "login.username": "Username",
   "login.password": "Password",
   "login.submit": "Login",
-  "login.register_link": "Register new account"
+  "login.register_submit": "Register",
+  "login.register_link": "Register new account",
+  "login.success": "Registration successful! Please login.",
+  "login.no_account": "Don't have an account?",
+  "login.has_account": "Already have an account?",
+  "login.link_register": "Register here",
+  "login.link_login": "Login here"
 }
