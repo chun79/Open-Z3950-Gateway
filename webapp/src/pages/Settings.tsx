@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
+import { useI18n } from '../context/I18nContext'
 
 interface Target {
   id: number
@@ -15,6 +16,7 @@ export default function Settings() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const { token, user } = useAuth()
+  const { t } = useI18n()
 
   // Form State
   const [newName, setNewName] = useState('')
@@ -119,19 +121,19 @@ export default function Settings() {
 
   return (
     <article>
-      <header><strong>Target Management</strong></header>
+      <header><strong>{t('settings.title')}</strong></header>
       
-      {error && <article className="pico-background-red-200">{error}</article>}
+      {error && <article className="pico-background-red-200">❌ {error}</article>}
 
       <figure>
         <table role="grid">
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Host:Port</th>
-              <th>DB Name</th>
-              <th>Encoding</th>
-              <th>Actions</th>
+              <th>{t('settings.col.name')}</th>
+              <th>{t('settings.col.host')}</th>
+              <th>{t('settings.col.db')}</th>
+              <th>{t('settings.col.encoding')}</th>
+              <th>{t('settings.col.actions')}</th>
             </tr>
           </thead>
           <tbody>
@@ -143,8 +145,8 @@ export default function Settings() {
                 <td><mark>{t.encoding}</mark></td>
                 <td>
                   <div role="group" style={{ marginBottom: 0 }}>
-                    <button className="outline secondary" onClick={() => handleTest(t.host, t.port)} style={{ padding: '2px 8px', fontSize: '0.8em' }}>Test</button>
-                    <button className="outline contrast" onClick={() => handleDelete(t.id)} style={{ padding: '2px 8px', fontSize: '0.8em' }}>Del</button>
+                    <button className="outline secondary" onClick={() => handleTest(t.host, t.port)} style={{ padding: '2px 8px', fontSize: '0.8em' }}>{t('settings.btn.test')}</button>
+                    <button className="outline contrast" onClick={() => handleDelete(t.id)} style={{ padding: '2px 8px', fontSize: '0.8em' }}>{t('settings.btn.del')}</button>
                   </div>
                 </td>
               </tr>
@@ -155,7 +157,7 @@ export default function Settings() {
 
       <hr />
       
-      <h5>Add New Target</h5>
+      <h5>{t('settings.add.title')}</h5>
       {testResult && (
         <article style={{ 
           padding: '10px', 
@@ -170,13 +172,13 @@ export default function Settings() {
       )}
       <form onSubmit={handleAdd}>
         <div className="grid">
-          <label>Friendly Name <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="e.g. British Library" required /></label>
-          <label>Host Address <input value={newHost} onChange={e => setNewHost(e.target.value)} placeholder="z3950.bl.uk" required /></label>
-          <label>Port <input type="number" value={newPort} onChange={e => setNewPort(Number(e.target.value))} required /></label>
+          <label>{t('settings.add.name')} <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="e.g. British Library" required /></label>
+          <label>{t('settings.add.host')} <input value={newHost} onChange={e => setNewHost(e.target.value)} placeholder="z3950.bl.uk" required /></label>
+          <label>{t('settings.add.port')} <input type="number" value={newPort} onChange={e => setNewPort(Number(e.target.value))} required /></label>
         </div>
         <div className="grid">
-          <label>Database Name <input value={newDB} onChange={e => setNewDB(e.target.value)} placeholder="main" required /></label>
-          <label>Encoding 
+          <label>{t('settings.add.db')} <input value={newDB} onChange={e => setNewDB(e.target.value)} placeholder="main" required /></label>
+          <label>{t('settings.add.encoding')} 
             <select value={newEncoding} onChange={e => setNewEncoding(e.target.value)}>
               <option value="MARC21">MARC21 (USMARC)</option>
               <option value="UNIMARC">UNIMARC</option>
@@ -184,8 +186,8 @@ export default function Settings() {
             </select>
           </label>
           <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end' }}>
-            <button type="button" className="secondary outline" onClick={() => handleTest(newHost, newPort)} disabled={!newHost}>Test Link</button>
-            <button type="submit">Add Target</button>
+            <button type="button" className="secondary outline" onClick={() => handleTest(newHost, newPort)} disabled={!newHost}>{t('settings.add.test_link')}</button>
+            <button type="submit">{t('settings.add.submit')}</button>
           </div>
         </div>
       </form>

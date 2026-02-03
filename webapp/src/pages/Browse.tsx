@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useI18n } from '../context/I18nContext'
 
 interface ScanResult {
   term: string
@@ -19,6 +20,7 @@ export default function Browse() {
   const [targetDB, setTargetDB] = useState('LCDB')
   const [scanField, setScanField] = useState('title')
   const { token } = useAuth()
+  const { t } = useI18n()
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -73,7 +75,6 @@ export default function Browse() {
     if (scanField === 'subject') attr = '21'
     
     // Navigate to Search with query params
-    // We need to update Search.tsx to read these params on mount
     navigate(`/?term=${encodeURIComponent(item.term)}&attr=${attr}&db=${targetDB}`)
   }
 
@@ -82,7 +83,7 @@ export default function Browse() {
       <article>
         <header>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <strong>Browse Index</strong>
+            <strong>{t('browse.title')}</strong>
             <select 
               value={targetDB} 
               onChange={(e) => setTargetDB(e.target.value)}
@@ -101,19 +102,19 @@ export default function Browse() {
               onChange={(e) => setScanField(e.target.value)}
               aria-label="Scan Field"
             >
-              <option value="title">By Title</option>
-              <option value="author">By Author</option>
-              <option value="subject">By Subject</option>
+              <option value="title">{t('browse.by_title')}</option>
+              <option value="author">{t('browse.by_author')}</option>
+              <option value="subject">{t('browse.by_subject')}</option>
             </select>
             <input 
               type="text" 
-              placeholder={`Enter start of ${scanField}...`} 
+              placeholder={t('browse.placeholder')} 
               value={term}
               onChange={(e) => setTerm(e.target.value)}
               required
             />
             <button type="submit" disabled={loading}>
-              {loading ? 'Scanning...' : 'Scan'}
+              {loading ? t('browse.scanning') : t('browse.button')}
             </button>
           </div>
         </form>
@@ -134,7 +135,7 @@ export default function Browse() {
 
       {error && (
         <article className="pico-background-red-200">
-          <strong>❌ Error:</strong> {error}
+          <strong>❌ {t('search.error')}:</strong> {error}
         </article>
       )}
 
@@ -146,7 +147,7 @@ export default function Browse() {
                 <strong>{item.term}</strong>
               </header>
               <div style={{ padding: '0 10px 10px' }}>
-                <small>Records found: <mark>{item.count}</mark></small>
+                <small>{t('browse.records_found')} <mark>{item.count}</mark></small>
               </div>
             </article>
           ))}
@@ -154,7 +155,7 @@ export default function Browse() {
       )}
       
       {results.length === 0 && !loading && !error && term && (
-        <p style={{ textAlign: 'center', marginTop: '20px' }}>No index entries found starting with "{term}".</p>
+        <p style={{ textAlign: 'center', marginTop: '20px' }}>{t('browse.no_entries').replace('{term}', term)}</p>
       )}
     </>
   )
