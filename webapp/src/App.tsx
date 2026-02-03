@@ -7,6 +7,7 @@ import Login from './pages/Login'
 import Settings from './pages/Settings'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { I18nProvider, useI18n } from './context/I18nContext'
+import { ThemeProvider, useTheme } from './context/ThemeContext'
 
 function ProtectedRoute({ children }: { children: JSX.Element }) {
   const { isAuthenticated } = useAuth();
@@ -31,6 +32,7 @@ function AdminRoute({ children }: { children: JSX.Element }) {
 function Navigation() {
   const { isAuthenticated, logout, user } = useAuth();
   const { t, locale, setLocale } = useI18n();
+  const { theme, toggleTheme } = useTheme();
   
   return (
     <nav>
@@ -65,6 +67,14 @@ function Navigation() {
             <li>
               <button 
                 className="outline secondary" 
+                style={{ padding: '5px 10px', fontSize: '0.8em', marginRight: '5px' }}
+                onClick={toggleTheme}
+                title="Toggle Theme"
+              >
+                {theme === 'light' ? '🌙' : '☀️'}
+              </button>
+              <button 
+                className="outline secondary" 
                 style={{ padding: '5px 10px', fontSize: '0.8em', marginRight: '10px' }}
                 onClick={() => setLocale(locale === 'en' ? 'zh' : 'en')}
               >
@@ -85,25 +95,27 @@ function Navigation() {
 
 function App() {
   return (
-    <I18nProvider>
-      <AuthProvider>
-        <BrowserRouter>
-          <div className="container">
-            <Navigation />
-            <main>
-              <Routes>
-                <Route path="/login" element={<Login />} />
-                <Route path="/" element={<ProtectedRoute><Search /></ProtectedRoute>} />
-                <Route path="/book/:db/:id" element={<ProtectedRoute><BookDetail /></ProtectedRoute>} />
-                <Route path="/browse" element={<ProtectedRoute><Browse /></ProtectedRoute>} />
-                <Route path="/requests" element={<ProtectedRoute><Requests /></ProtectedRoute>} />
-                <Route path="/settings" element={<AdminRoute><Settings /></AdminRoute>} />
-              </Routes>
-            </main>
-          </div>
-        </BrowserRouter>
-      </AuthProvider>
-    </I18nProvider>
+    <ThemeProvider>
+      <I18nProvider>
+        <AuthProvider>
+          <BrowserRouter>
+            <div className="container">
+              <Navigation />
+              <main>
+                <Routes>
+                  <Route path="/login" element={<Login />} />
+                  <Route path="/" element={<ProtectedRoute><Search /></ProtectedRoute>} />
+                  <Route path="/book/:db/:id" element={<ProtectedRoute><BookDetail /></ProtectedRoute>} />
+                  <Route path="/browse" element={<ProtectedRoute><Browse /></ProtectedRoute>} />
+                  <Route path="/requests" element={<ProtectedRoute><Requests /></ProtectedRoute>} />
+                  <Route path="/settings" element={<AdminRoute><Settings /></AdminRoute>} />
+                </Routes>
+              </main>
+            </div>
+          </BrowserRouter>
+        </AuthProvider>
+      </I18nProvider>
+    </ThemeProvider>
   )
 }
 
