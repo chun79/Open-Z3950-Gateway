@@ -108,16 +108,16 @@ type User struct {
 
 	
 
-			// CreateILLRequest creates a new Inter-Library Loan request.
-
-		CreateILLRequest(req ILLRequest) error
-
-	
-
-		// ListILLRequests retrieves all Inter-Library Loan requests.
-
-		ListILLRequests() ([]ILLRequest, error)
-
+				// CreateILLRequest creates a new Inter-Library Loan request.
+			
+				CreateILLRequest(req ILLRequest) error
+			
+				// GetILLRequest retrieves a single ILL request by ID.
+				GetILLRequest(id int64) (*ILLRequest, error)
+			
+				// ListILLRequests retrieves all Inter-Library Loan requests.
+			
+				ListILLRequests() ([]ILLRequest, error)
 	
 
 		// UpdateILLRequestStatus updates the status of an ILL request.

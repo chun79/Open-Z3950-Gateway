@@ -52,6 +52,10 @@ func (h *HybridProvider) CreateILLRequest(req ILLRequest) error {
 	return h.local.CreateILLRequest(req)
 }
 
+func (h *HybridProvider) GetILLRequest(id int64) (*ILLRequest, error) {
+	return h.local.GetILLRequest(id)
+}
+
 func (h *HybridProvider) ListILLRequests() ([]ILLRequest, error) {
 	return h.local.ListILLRequests()
 }

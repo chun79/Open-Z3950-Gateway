@@ -234,6 +234,10 @@ func (p *ProxyProvider) CreateILLRequest(req ILLRequest) error {
 	return fmt.Errorf("proxy provider does not support creating ILL requests locally")
 }
 
+func (p *ProxyProvider) GetILLRequest(id int64) (*ILLRequest, error) {
+	return nil, fmt.Errorf("proxy provider does not support ILL")
+}
+
 func (p *ProxyProvider) ListILLRequests() ([]ILLRequest, error) {
 	return []ILLRequest{}, nil
 }

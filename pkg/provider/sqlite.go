@@ -400,6 +400,20 @@ func (p *SQLiteProvider) CreateILLRequest(req ILLRequest) error {
 	return err
 }
 
+func (p *SQLiteProvider) GetILLRequest(id int64) (*ILLRequest, error) {
+	var r ILLRequest
+	var comments sql.NullString
+	err := p.db.QueryRow("SELECT id, target_db, record_id, title, author, isbn, status, requestor, comments FROM ill_requests WHERE id = ?", id).
+		Scan(&r.ID, &r.TargetDB, &r.RecordID, &r.Title, &r.Author, &r.ISBN, &r.Status, &r.Requestor, &comments)
+	if err != nil {
+		return nil, err
+	}
+	if comments.Valid {
+		r.Comments = comments.String
+	}
+	return &r, nil
+}
+
 func (p *SQLiteProvider) ListILLRequests() ([]ILLRequest, error) {
 	rows, err := p.db.Query("SELECT id, target_db, record_id, title, author, isbn, status, requestor, comments FROM ill_requests ORDER BY created_at DESC")
 	if err != nil {

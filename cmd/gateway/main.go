@@ -15,6 +15,7 @@ import (
 	ber "github.com/go-asn1-ber/asn1-ber"
 	"github.com/gin-gonic/gin"
 	"github.com/yourusername/open-z3950-gateway/pkg/auth"
+	"github.com/yourusername/open-z3950-gateway/pkg/notify"
 	"github.com/yourusername/open-z3950-gateway/pkg/provider"
 	"github.com/yourusername/open-z3950-gateway/pkg/ui"
 	"github.com/yourusername/open-z3950-gateway/pkg/z3950"
@@ -461,6 +462,8 @@ func authMiddleware() gin.HandlerFunc {
 func setupRouter(dbProvider provider.Provider) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Recovery())
+	
+	notifier := notify.NewLogNotifier()
 
 	// Public Auth Routes
 	r.POST("/api/auth/login", func(c *gin.Context) {
@@ -816,6 +819,13 @@ func setupRouter(dbProvider provider.Provider) *gin.Engine {
 			return
 		}
 
+		// Fetch existing request to get details for notification
+		existingReq, err := dbProvider.GetILLRequest(id)
+		if err != nil {
+			c.JSON(404, gin.H{"error": "Request not found"})
+			return
+		}
+
 		if err := dbProvider.UpdateILLRequestStatus(id, body.Status); err != nil {
 			slog.Error("failed to update ILL request status", "id", id, "status", body.Status, "error", err)
 			c.JSON(500, gin.H{"error": "Failed to update status: " + err.Error()})
@@ -823,6 +833,16 @@ func setupRouter(dbProvider provider.Provider) *gin.Engine {
 		}
 
 		slog.Info("ILL request status updated", "id", id, "status", body.Status)
+		
+		// Send Notification (Stub)
+		// We use the Requestor username as email for now, or a dummy email
+		toEmail := existingReq.Requestor
+		if !strings.Contains(toEmail, "@") {
+			toEmail = toEmail + "@example.com"
+		}
+		
+		go notifier.SendILLStatusUpdate(toEmail, existingReq.Title, body.Status, "Status updated by admin")
+
 		c.JSON(200, gin.H{"status": "success", "message": "Status updated"})
 	})
 

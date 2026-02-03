@@ -393,9 +393,23 @@ func (p *PostgresProvider) Scan(db, field, startTerm string) ([]ScanResult, erro
 }
 
 func (p *PostgresProvider) CreateILLRequest(req ILLRequest) error {
-	sqlStr := `INSERT INTO ill_requests (target_db, record_id, title, author, isbn, status, requestor) VALUES ($1, $2, $3, $4, $5, $6, $7)`
-	_, err := p.db.Exec(sqlStr, req.TargetDB, req.RecordID, req.Title, req.Author, req.ISBN, req.Status, req.Requestor)
+	sqlStr := `INSERT INTO ill_requests (target_db, record_id, title, author, isbn, status, requestor, comments) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
+	_, err := p.db.Exec(sqlStr, req.TargetDB, req.RecordID, req.Title, req.Author, req.ISBN, req.Status, req.Requestor, req.Comments)
 	return err
+}
+
+func (p *PostgresProvider) GetILLRequest(id int64) (*ILLRequest, error) {
+	var r ILLRequest
+	var comments sql.NullString
+	err := p.db.QueryRow("SELECT id, target_db, record_id, title, author, isbn, status, requestor, comments FROM ill_requests WHERE id = $1", id).
+		Scan(&r.ID, &r.TargetDB, &r.RecordID, &r.Title, &r.Author, &r.ISBN, &r.Status, &r.Requestor, &comments)
+	if err != nil {
+		return nil, err
+	}
+	if comments.Valid {
+		r.Comments = comments.String
+	}
+	return &r, nil
 }
 
 func (p *PostgresProvider) ListILLRequests() ([]ILLRequest, error) {

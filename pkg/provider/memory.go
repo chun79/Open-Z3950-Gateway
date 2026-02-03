@@ -179,8 +179,20 @@ func (m *MemoryProvider) CreateILLRequest(req ILLRequest) error {
 	defer m.mu.Unlock()
 	req.ID = int64(len(m.illRequests) + 1)
 	m.illRequests = append(m.illRequests, req)
-	slog.Info("memory provider: created ILL request", "req", req)
 	return nil
+}
+
+func (m *MemoryProvider) GetILLRequest(id int64) (*ILLRequest, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, req := range m.illRequests {
+		if req.ID == id {
+			// Return a copy
+			r := req
+			return &r, nil
+		}
+	}
+	return nil, fmt.Errorf("request not found")
 }
 
 func (m *MemoryProvider) ListILLRequests() ([]ILLRequest, error) {
