@@ -13,6 +13,15 @@ type QueryRow = {
   operator: string
 }
 
+type SearchHistoryItem = {
+  timestamp: number
+  db: string
+  type: 'simple' | 'advanced'
+  query?: string
+  rows?: QueryRow[]
+  summary: string
+}
+
 const OPERATORS = [
   { value: 'AND', label: 'AND' },
   { value: 'OR', label: 'OR' },
@@ -47,11 +56,51 @@ export default function Search() {
   const [error, setError] = useState('')
   const [requestStatus, setRequestStatus] = useState<{msg: string, type: 'success' | 'error'} | null>(null)
   
+  // History State
+  const [history, setHistory] = useState<SearchHistoryItem[]>([])
+  const [showHistory, setShowHistory] = useState(false)
+
   // Citation Modal State
   const [citation, setCitation] = useState<{ content: string, format: string } | null>(null)
 
   const { token } = useAuth()
   const location = useLocation()
+
+  useEffect(() => {
+    const saved = localStorage.getItem('z3950_search_history')
+    if (saved) {
+      try {
+        setHistory(JSON.parse(saved))
+      } catch (e) {
+        console.error("Failed to parse history", e)
+      }
+    }
+  }, [])
+
+  const saveToHistory = (item: SearchHistoryItem) => {
+    const newHistory = [item, ...history.filter(h => h.summary !== item.summary)].slice(0, 10)
+    setHistory(newHistory)
+    localStorage.setItem('z3950_search_history', JSON.stringify(newHistory))
+  }
+
+  const loadHistory = (item: SearchHistoryItem) => {
+    setTargetDB(item.db)
+    if (item.type === 'advanced' && item.rows) {
+      setIsAdvanced(true)
+      setRows(item.rows)
+      doSearch(item.db, item.rows)
+    } else if (item.query) {
+      setIsAdvanced(false)
+      setSimpleQuery(item.query)
+      doSearch(item.db, null, item.query)
+    }
+    setShowHistory(false)
+  }
+
+  const clearHistory = () => {
+    setHistory([])
+    localStorage.removeItem('z3950_search_history')
+  }
 
   useEffect(() => {
     fetch('/api/targets', { headers: { 'Authorization': `Bearer ${token}` } })
@@ -103,6 +152,8 @@ export default function Search() {
       const params = new URLSearchParams()
       params.append('db', db)
       
+      let summary = ""
+
       if (advancedRows) {
         advancedRows.forEach((row, index) => {
           const i = index + 1
@@ -110,10 +161,13 @@ export default function Search() {
           params.append(`attr${i}`, row.attribute)
           if (i > 1) params.append(`op${i}`, row.operator)
         })
+        summary = `[${db}] ` + advancedRows.map(r => `${r.term} (${ATTRIBUTES.find(a => a.value === r.attribute)?.label || r.attribute})`).join(" AND ")
       } else if (simpleTerm) {
         params.append('term1', simpleTerm)
         params.append('attr1', '1016')
+        summary = `[${db}] ${simpleTerm}`
       } else {
+        setLoading(false)
         return // Nothing to search
       }
 
@@ -128,6 +182,17 @@ export default function Search() {
       const list = data.data || []
       setResults(list)
       if (list.length === 0) setError(t('search.no_results'))
+        
+      // Save history on success (even if 0 results, valid query)
+      saveToHistory({
+        timestamp: Date.now(),
+        db,
+        type: advancedRows ? 'advanced' : 'simple',
+        query: simpleTerm,
+        rows: advancedRows,
+        summary
+      })
+
     } catch (err: any) {
       setError(err.message)
     } finally {
@@ -220,6 +285,15 @@ export default function Search() {
             </div>
             
             <div style={{display: 'flex', alignItems: 'center', gap: '10px'}}>
+              {history.length > 0 && (
+                <button 
+                  className="outline secondary" 
+                  onClick={() => setShowHistory(!showHistory)}
+                  style={{padding: '5px 10px', fontSize: '0.8em', marginBottom: 0}}
+                >
+                  ⏱ History
+                </button>
+              )}
               <small>{t('search.target')}</small>
               <select 
                 value={targetDB} 
@@ -232,6 +306,27 @@ export default function Search() {
             </div>
           </div>
         </header>
+
+        {showHistory && history.length > 0 && (
+          <div style={{ padding: '10px', background: '#f9f9f9', marginBottom: '20px', borderRadius: '4px', border: '1px solid #ddd' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
+              <strong>Recent Searches</strong>
+              <button className="outline contrast" onClick={clearHistory} style={{ padding: '2px 8px', fontSize: '0.7em', width: 'auto', marginBottom: 0 }}>Clear</button>
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
+              {history.map((item, idx) => (
+                <button 
+                  key={idx} 
+                  className="outline secondary" 
+                  onClick={() => loadHistory(item)}
+                  style={{ padding: '5px 10px', fontSize: '0.8em', marginBottom: 0 }}
+                >
+                  {item.summary}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         <form onSubmit={handleSearch}>
           {!isAdvanced ? (
