@@ -1,27 +1,32 @@
 # Open-Z3950-Gateway
 
-![Go](https://img.shields.io/badge/Go-1.23+-00ADD8?style=flat&logo=go)
+![Go](https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat&logo=go)
 ![React](https://img.shields.io/badge/Frontend-React_18-61DAFB?style=flat&logo=react)
 ![Protocol](https://img.shields.io/badge/Protocol-Z39.50%20(ISO%2023950)-blue)
 ![License](https://img.shields.io/badge/License-MIT-green)
+![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker)
 
-**Open-Z3950-Gateway** is a modern, full-stack Inter-Library Loan (ILL) and Z39.50 gateway platform. It bridges the gap between modern Web APIs and legacy library protocols.
+**Open-Z3950-Gateway** is a modern, enterprise-grade Inter-Library Loan (ILL) and Z39.50 gateway platform. It bridges the gap between modern Web APIs and legacy library protocols, providing a beautiful, unified interface for searching and managing bibliographic data across the globe.
 
-It serves as both a **Z39.50 Client** (proxying requests to Oxford, Harvard, LOC) and a **Z39.50 Server** (exposing local data), wrapped in a beautiful React UI with multi-tenant authentication.
+> **Why this exists:** Most library systems are locked behind ancient Z39.50 protocols and ugly desktop clients. This project modernizes the experience with a reactive Web UI, JSON APIs, and seamless proxying.
 
-## 🌟 Key Features
+## ✨ Key Features
 
-*   **Hybrid Architecture**: Seamlessly searches local databases (SQLite/Postgres) OR proxies requests to remote Z39.50 servers.
-*   **Advanced Query Builder**: Visual UI for building complex boolean queries (e.g., `Title=Linux AND (Author=Torvalds OR Subject=Kernel)`).
-*   **Recursive RPN Engine**: Backend fully supports arbitrarily nested Z39.50 Type-1 queries with true boolean logic.
-*   **Extended Attributes**: Support for comprehensive Bib-1 attributes:
-    *   **Title** (4), **Author** (1003), **ISBN** (7), **ISSN** (8), **Subject** (21), **Date** (31), **Any** (1016).
-*   **Multi-Syntax Support**: Automatically negotiates **MARC21**, **UNIMARC**, or **SUTRS** (Text) based on target capabilities.
-*   **ILL Management**: Complete Inter-Library Loan workflow (Request -> Review -> Approve/Reject) with user tracking.
-*   **SaaS Ready**:
-    *   **JWT Authentication**: Secure login/registration system.
-    *   **Dynamic Targets**: Admins can add/remove remote libraries via the Web UI (no restart needed).
-    *   **Dockerized**: Single-container deployment (Go binary + Embedded Frontend).
+### 🔍 Powerful Search Engine
+*   **Hybrid Search**: Simultaneously search your local database (SQLite/Postgres) and remote Z39.50 targets (Oxford, Harvard, Library of Congress).
+*   **Recursive Boolean Queries**: Build complex queries like `(Title=Linux OR Title=Unix) AND (Author=Torvalds)`.
+*   **Intelligent Decoding**: Automatically handles legacy character encodings (MARC-8, GBK, Big5, ANSEL) and converts them to UTF-8.
+
+### 🌐 Modern Web Interface
+*   **Responsive Design**: Built with React and Pico.css for a clean, mobile-friendly experience.
+*   **Internationalization (I18n)**: Full support for **English** and **Chinese (简体中文)**.
+*   **Search History**: Local-storage based history for quick query restoration.
+*   **Citation Generation**: One-click export to **BibTeX** and **RIS** formats.
+
+### 📚 Library Management
+*   **Holdings Display**: Real-time availability status, call numbers, and shelf locations.
+*   **ILL Workflow**: Integrated Request -> Review -> Approve/Reject workflow for inter-library loans.
+*   **Dynamic Targets**: Admins can add/configure remote Z39.50 servers via the UI without restarting.
 
 ## 🛠 Architecture
 
@@ -46,13 +51,11 @@ graph TD
     Proxy -->|TCP/Z39.50| Harvard[Harvard University]
 ```
 
-For detailed technical specifications of the Z39.50 implementation (PDUs, OIDs, Attributes), see [docs/PROTOCOL.md](docs/PROTOCOL.md).
-
 ## 🚀 Quick Start
 
 ### Docker (Recommended)
 
-Run the full stack with a single command.
+Run the full stack with a single command. The image is optimized (Alpine-based, ~25MB).
 
 ```bash
 docker compose up -d --build
@@ -78,6 +81,7 @@ Access the application at **http://localhost:8899**.
     ```
 3.  **Build Backend**:
     ```bash
+    # Requires Go 1.24+
     go build -o gateway ./cmd/gateway
     ```
 4.  **Run**:
@@ -100,75 +104,23 @@ The application is configured via environment variables.
 | `PORT` | HTTP Server Port | `8899` |
 | `ZSERVER_PORT` | Z39.50 Server Port | `2100` |
 | `GATEWAY_API_KEY`| API Key for protected non-user endpoints | - |
-| `ZSERVER_ALLOWED_IPS` | CIDR allowlist for Z39.50 server | `0.0.0.0/0` |
 
-## 🛠 Maintenance Tools
+## 📖 Documentation
 
-The project includes a suite of administrative and debugging tools in `cmd/tools/`.
-See [docs/TOOLS.md](docs/TOOLS.md) for a complete list and usage instructions.
-
-## 🔌 API Documentation
-
-All API endpoints start with `/api`. Protected endpoints require `Authorization: Bearer <token>` or `X-API-Key`.
-
-### Search API
-
-**Endpoint**: `GET /api/search`
-
-Supports recursive boolean logic.
-
-| Parameter | Description | Example |
-| :--- | :--- | :--- |
-| `db` | Target Database Name | `Oxford`, `Local` |
-| `term1` | First search term | `Go Language` |
-| `attr1` | First attribute (Use ID) | `4` (Title) |
-| `op2` | Operator for 2nd clause | `AND`, `OR`, `AND-NOT` |
-| `term2` | Second search term | `2024` |
-| `attr2` | Second attribute | `31` (Date) |
-| `opN`... | Nth Operator | `OR` |
-
-**Example URL**:
-`/api/search?db=Local&term1=Go&attr1=4&op2=AND&term2=Pike&attr2=1003`
-*(Title="Go" AND Author="Pike")*
-
-### Supported Attributes (Bib-1)
-
-| Name | ID | Description |
-| :--- | :--- | :--- |
-| **Personal Name** | 1 | Author name |
-| **Title** | 4 | Book title |
-| **ISBN** | 7 | International Standard Book Number |
-| **ISSN** | 8 | International Standard Serial Number |
-| **Subject** | 21 | Subject heading |
-| **Date** | 31 | Date of publication |
-| **Any** | 1016 | Keyword search (Title/Author/Subject) |
-
-### Management API
-
-| Method | Endpoint | Description |
-| :--- | :--- | :--- |
-| **POST** | `/api/auth/login` | Get JWT token |
-| **GET** | `/api/scan` | Browse index (`?term=Hamlet&db=LCDB`) |
-| **GET** | `/api/targets` | List available libraries |
-| **POST** | `/api/ill-requests` | Submit a loan request |
-| **GET** | `/api/admin/targets` | Manage Z39.50 targets (Admin only) |
-
-## 📦 Project Structure
-
-*   `cmd/gateway`: Main entry point (HTTP + ZServer).
-*   `pkg/z3950`: Core protocol stack (BER encoding, RPN builder, Client).
-*   `pkg/provider`: Data abstraction layer.
-    *   `hybrid.go`: Routes requests between Local and Proxy.
-    *   `proxy.go`: Handles remote Z39.50 connections.
-    *   `sqlite.go` / `postgres.go`: Local persistence.
-*   `pkg/auth`: JWT and Password hashing utilities.
-*   `pkg/ui`: Embedded frontend assets.
-*   `webapp`: React + Vite + TypeScript source code.
+*   [**Protocol Details**](docs/PROTOCOL.md): Technical specs of the Z39.50 implementation (PDUs, OIDs).
+*   [**Maintenance Tools**](docs/TOOLS.md): CLI utilities for database inspection and connection debugging.
+*   [**Frontend Guide**](webapp/README.md): Development guide for the React application.
 
 ## 🤝 Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for details on how to submit pull requests.
+We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details.
+
+1.  Fork the repo.
+2.  Create your feature branch (`git checkout -b feat/amazing-feature`).
+3.  Commit your changes (`git commit -m 'feat: add amazing feature'`).
+4.  Push to the branch (`git push origin feat/amazing-feature`).
+5.  Open a Pull Request.
 
 ## License
 
-MIT
+MIT © 2026 Open-Z3950-Gateway Contributors
