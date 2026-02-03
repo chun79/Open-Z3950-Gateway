@@ -16,8 +16,8 @@ RUN go mod download
 COPY . .
 # Copy the compiled frontend assets from the previous stage to the location Go expects
 COPY --from=frontend-builder /app/dist ./pkg/ui/dist
-# Build the binary
-RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/gateway ./cmd/gateway
+# Build the binary with low concurrency (-p 1) to avoid OOM in CI, and verbose output
+RUN CGO_ENABLED=0 GOOS=linux go build -p 1 -x -v -o /bin/gateway ./cmd/gateway
 
 # Stage 3: Final Runtime Image
 FROM alpine:latest
