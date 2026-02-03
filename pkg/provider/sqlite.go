@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 	"golang.org/x/crypto/bcrypt"
 	"github.com/yourusername/open-z3950-gateway/pkg/z3950"
 )
@@ -24,7 +24,7 @@ func NewSQLiteProvider(path string) (*SQLiteProvider, error) {
 		return nil, fmt.Errorf("sqlite provider requires a non-empty database path")
 	}
 
-	db, err := sql.Open("sqlite3", path)
+	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open sqlite db at %s: %w", path, err)
 	}
