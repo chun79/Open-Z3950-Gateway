@@ -12,6 +12,28 @@ import (
 	"github.com/yourusername/open-z3950-gateway/pkg/z3950"
 )
 
+// friendlyError maps technical errors to user-friendly messages
+func friendlyError(target string, action string, err error) error {
+	msg := err.Error()
+	friendly := msg
+
+	if strings.Contains(msg, "i/o timeout") {
+		friendly = fmt.Sprintf("Connection to %s timed out.", target)
+	} else if strings.Contains(msg, "connection refused") {
+		friendly = fmt.Sprintf("%s server refused the connection.", target)
+	} else if strings.Contains(msg, "no such host") {
+		friendly = fmt.Sprintf("Could not resolve hostname for %s.", target)
+	} else if strings.Contains(msg, "server rejected connection") {
+		friendly = fmt.Sprintf("%s rejected the connection (Invalid credentials/options).", target)
+	} else if strings.Contains(msg, "reset by peer") {
+		friendly = fmt.Sprintf("%s closed the connection unexpectedly.", target)
+	}
+
+	// Log original error for debugging but return friendly one
+	slog.Error("Z39.50 Error", "target", target, "action", action, "original_error", err)
+	return fmt.Errorf(friendly)
+}
+
 // TargetConfig holds connection details for a remote Z39.50 server
 type TargetConfig struct {
 	Host         string
@@ -40,7 +62,7 @@ func (p *ProxyProvider) connectToTarget(targetName string) (*z3950.Client, Targe
 	// Resolve target from DB
 	t, err := p.resolver.GetTargetByName(targetName)
 	if err != nil {
-		return nil, TargetConfig{}, fmt.Errorf("unknown target: %s (%w)", targetName, err)
+		return nil, TargetConfig{}, fmt.Errorf("unknown target: %s", targetName)
 	}
 
 	config := TargetConfig{
@@ -52,12 +74,12 @@ func (p *ProxyProvider) connectToTarget(targetName string) (*z3950.Client, Targe
 
 	client := z3950.NewClient(config.Host, config.Port)
 	if err := client.Connect(); err != nil {
-		return nil, config, fmt.Errorf("failed to connect to %s: %w", targetName, err)
+		return nil, config, friendlyError(targetName, "connect", err)
 	}
 
 	if err := client.Init(); err != nil {
 		client.Close()
-		return nil, config, fmt.Errorf("failed to init connection to %s: %w", targetName, err)
+		return nil, config, friendlyError(targetName, "init", err)
 	}
 	
 	return client, config, nil
@@ -73,7 +95,7 @@ func (p *ProxyProvider) executeRemoteSearch(targetName string, query z3950.Struc
 	count, err := client.StructuredSearch(config.DatabaseName, query)
 	if err != nil {
 		client.Close()
-		return nil, 0, config, fmt.Errorf("remote search failed on %s: %w", targetName, err)
+		return nil, 0, config, friendlyError(targetName, "search", err)
 	}
 
 	return client, count, config, nil
