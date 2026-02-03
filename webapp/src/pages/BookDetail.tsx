@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useI18n } from '../context/I18nContext'
 import { Book } from '../types'
 
 export default function BookDetail() {
   const { db, id } = useParams<{ db: string, id: string }>()
   const navigate = useNavigate()
   const { token } = useAuth()
+  const { t } = useI18n()
   
   const [book, setBook] = useState<Book | null>(null)
   const [loading, setLoading] = useState(true)
@@ -16,12 +18,9 @@ export default function BookDetail() {
   useEffect(() => {
     if (!db || !id) return
     
-    // Check if we passed state via navigation (not typical for direct link, but good for back)
-    // Actually, always fetch fresh data to ensure we have details
     const fetchBook = async () => {
       setLoading(true)
       try {
-        // We need to encode the ID because it might contain colons (sessionID:index)
         const safeId = encodeURIComponent(id)
         const response = await fetch(`/api/books/${db}/${safeId}`, {
           headers: { 'Authorization': `Bearer ${token}` }
@@ -61,9 +60,15 @@ export default function BookDetail() {
         throw new Error(errData.error || 'Request failed')
       }
 
-      setRequestStatus({ msg: `Requested "${book.title}" successfully!`, type: 'success' })
+      setRequestStatus({ 
+        msg: t('detail.request_success').replace('{title}', book.title), 
+        type: 'success' 
+      })
     } catch (err: any) {
-      setRequestStatus({ msg: `Failed to request: ${err.message}`, type: 'error' })
+      setRequestStatus({ 
+        msg: t('detail.request_fail').replace('{error}', err.message), 
+        type: 'error' 
+      })
     }
   }
 
@@ -77,7 +82,9 @@ export default function BookDetail() {
 
   return (
     <div className="container">
-      <button className="outline secondary" onClick={() => navigate(-1)} style={{marginBottom: '20px'}}>← Back</button>
+      <button className="outline secondary" onClick={() => navigate(-1)} style={{marginBottom: '20px'}}>
+        ← {t('detail.back')}
+      </button>
       
       <article>
         <div className="grid">
@@ -111,44 +118,44 @@ export default function BookDetail() {
 
             <div className="grid">
               <div>
-                <small>Publisher</small>
+                <small>{t('detail.publisher')}</small>
                 <p><strong>{book.publisher}</strong></p>
               </div>
               <div>
-                <small>Edition</small>
+                <small>{t('detail.edition')}</small>
                 <p><strong>{book.edition || '-'}</strong></p>
               </div>
               <div>
-                <small>ISBN</small>
+                <small>{t('detail.isbn')}</small>
                 <p><strong>{book.isbn}</strong></p>
               </div>
             </div>
 
             {book.summary && (
               <details open>
-                <summary>Summary</summary>
+                <summary>{t('detail.summary')}</summary>
                 <p>{book.summary}</p>
               </details>
             )}
 
             {book.toc && (
               <details>
-                <summary>Table of Contents</summary>
+                <summary>{t('detail.toc')}</summary>
                 <pre style={{whiteSpace: 'pre-wrap', fontFamily: 'sans-serif'}}>{book.toc}</pre>
               </details>
             )}
 
             {book.physical && (
-              <p><small>Physical: {book.physical}</small></p>
+              <p><small>{t('detail.physical')}: {book.physical}</small></p>
             )}
             
             {book.series && (
-              <p><small>Series: {book.series}</small></p>
+              <p><small>{t('detail.series')}: {book.series}</small></p>
             )}
 
             <footer>
               <div role="group">
-                <button onClick={handleILLRequest}>Request Item</button>
+                <button onClick={handleILLRequest}>{t('detail.request_btn')}</button>
                 <button className="secondary outline">Add to List</button>
               </div>
             </footer>
