@@ -53,9 +53,15 @@ func (QueryComplex) isQueryNode() {}
 
 // StructuredQuery represents a parsed Z39.50 query as a Tree.
 type StructuredQuery struct {
-	Root   QueryNode
-	Limit  int
-	Offset int
+	Root     QueryNode
+	Limit    int
+	Offset   int
+	SortKeys []SortKey
+}
+
+type SortKey struct {
+	Attribute int // Use Attribute
+	Relation  int // 0=Ascending, 1=Descending
 }
 
 

@@ -45,6 +45,10 @@ export default function Search() {
   const [targets, setTargets] = useState<string[]>([])
   const [targetDB, setTargetDB] = useState('LCDB')
   
+  // Sort State
+  const [sortAttr, setSortAttr] = useState('4') // Default Title
+  const [sortOrder, setSortOrder] = useState('asc')
+
   const [results, setResults] = useState<Book[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -151,6 +155,10 @@ export default function Search() {
     try {
       const params = new URLSearchParams()
       params.append('db', db)
+      
+      // Append Sort Params
+      params.append('sortAttr', sortAttr)
+      params.append('sortOrder', sortOrder)
       
       let summary = ""
 
@@ -294,15 +302,41 @@ export default function Search() {
                   ⏱ History
                 </button>
               )}
-              <small>{t('search.target')}</small>
-              <select 
-                value={targetDB} 
-                onChange={(e) => setTargetDB(e.target.value)}
-                style={{ width: 'auto', marginBottom: 0 }}
-              >
-                {targets.map(t => <option key={t} value={t}>{t}</option>)}
-                {targets.length === 0 && <option value="LCDB">LCDB</option>}
-              </select>
+              
+              <div style={{display: 'flex', flexDirection: 'column', gap: '2px'}}>
+                <small style={{fontSize: '0.7em'}}>Sort By</small>
+                <div style={{display: 'flex', gap: '5px'}}>
+                  <select 
+                    value={sortAttr} 
+                    onChange={(e) => setSortAttr(e.target.value)}
+                    style={{ width: 'auto', marginBottom: 0, padding: '5px', fontSize: '0.8em', height: 'auto' }}
+                  >
+                    <option value="4">{t('search.attr.title')}</option>
+                    <option value="1003">{t('search.attr.author')}</option>
+                    <option value="31">{t('search.attr.date')}</option>
+                  </select>
+                  <select 
+                    value={sortOrder} 
+                    onChange={(e) => setSortOrder(e.target.value)}
+                    style={{ width: 'auto', marginBottom: 0, padding: '5px', fontSize: '0.8em', height: 'auto' }}
+                  >
+                    <option value="asc">↑</option>
+                    <option value="desc">↓</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style={{display: 'flex', flexDirection: 'column', gap: '2px'}}>
+                <small style={{fontSize: '0.7em'}}>{t('search.target')}</small>
+                <select 
+                  value={targetDB} 
+                  onChange={(e) => setTargetDB(e.target.value)}
+                  style={{ width: 'auto', marginBottom: 0, padding: '5px', fontSize: '0.8em', height: 'auto' }}
+                >
+                  {targets.map(t => <option key={t} value={t}>{t}</option>)}
+                  {targets.length === 0 && <option value="LCDB">LCDB</option>}
+                </select>
+              </div>
             </div>
           </div>
         </header>

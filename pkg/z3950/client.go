@@ -545,6 +545,91 @@ type ScanEntry struct {
 	Count int
 }
 
+func (c *Client) Sort(resultSetName string, keys []SortKey) error {
+	pdu := ber.Encode(ber.ClassContext, ber.TypeConstructed, 43, nil, "SortRequest")
+	
+	// ReferenceID (Optional)
+	
+	// InputResultSetNames [3] IMPLICIT SEQUENCE OF InternationalString
+	input := ber.Encode(ber.ClassContext, ber.TypeConstructed, 3, nil, "InputResultSets")
+	input.AppendChild(ber.NewString(ber.ClassUniversal, ber.TypePrimitive, ber.TagVisibleString, resultSetName, "ResultSetName"))
+	pdu.AppendChild(input)
+
+	// SortedResultSetName [4] IMPLICIT InternationalString
+	pdu.AppendChild(ber.NewString(ber.ClassContext, ber.TypePrimitive, 4, resultSetName, "SortedResultSetName"))
+
+	// SortSequence [5] IMPLICIT SEQUENCE OF SortKeySpec
+	seq := ber.Encode(ber.ClassContext, ber.TypeConstructed, 5, nil, "SortSequence")
+	
+	for _, k := range keys {
+		spec := ber.Encode(ber.ClassUniversal, ber.TypeConstructed, ber.TagSequence, nil, "SortKeySpec")
+		
+		// SortKey [0] CHOICE { privateSortKey, elementSpec, sortAttributes }
+		sk := ber.Encode(ber.ClassContext, ber.TypeConstructed, 0, nil, "SortKey")
+		// sortAttributes [2] IMPLICIT SEQUENCE { id, list }
+		sa := ber.Encode(ber.ClassContext, ber.TypeConstructed, 2, nil, "SortAttributes")
+		sa.AppendChild(ber.NewString(ber.ClassUniversal, ber.TypePrimitive, ber.TagObjectIdentifier, OID_Bib1, "AttributeSetId"))
+		
+		list := ber.Encode(ber.ClassUniversal, ber.TypeConstructed, ber.TagSequence, nil, "AttributeList")
+		
+		// Use Attribute
+		useAttr := ber.Encode(ber.ClassUniversal, ber.TypeConstructed, ber.TagSequence, nil, "Attr")
+		useAttr.AppendChild(ber.NewInteger(ber.ClassUniversal, ber.TypePrimitive, ber.TagInteger, 1, "Type"))
+		useAttr.AppendChild(ber.NewInteger(ber.ClassUniversal, ber.TypePrimitive, ber.TagInteger, int64(k.Attribute), "Value"))
+		list.AppendChild(useAttr)
+
+		// Relation Attribute (Sort Relation: 1=Ascending, 2=Descending)
+		relVal := 1 // Default Ascending
+		if k.Relation == 1 { relVal = 2 } // Descending
+		
+		relAttr := ber.Encode(ber.ClassUniversal, ber.TypeConstructed, ber.TagSequence, nil, "Attr")
+		relAttr.AppendChild(ber.NewInteger(ber.ClassUniversal, ber.TypePrimitive, ber.TagInteger, 2, "Type")) // 2 = Relation
+		// Relation: 3=Equal (default?), 1=Less, 2=LE... 
+		// Actually, for Sort, Bib-1 Relation values are often repurposed or specific sort attributes used.
+		// Standard Sort Relation attribute (type 7?): 1=Ascending, 2=Descending.
+		// But in Bib-1, standard Use attributes are used.
+		// The standard way is using SortKeySpec -> SortRelation (Tag 1) INTEGER { ascending(0), descending(1), ascendingByKey(3)... }
+		// Wait, SortKeySpec has `sortRelation [1] IMPLICIT INTEGER DEFAULT ascending`.
+		// It is NOT inside the AttributeList.
+		
+		sa.AppendChild(list)
+		sk.AppendChild(sa)
+		spec.AppendChild(sk)
+
+		// SortRelation [1] IMPLICIT INTEGER DEFAULT 0 (ascending)
+		relation := 0 
+		if k.Relation == 1 { relation = 1 } // 1 = descending
+		spec.AppendChild(ber.NewInteger(ber.ClassContext, ber.TypePrimitive, 1, int64(relation), "SortRelation"))
+		
+		// CaseSensitivity [2] IMPLICIT INTEGER { caseSensitive(0), caseInsensitive(1) }
+		spec.AppendChild(ber.NewInteger(ber.ClassContext, ber.TypePrimitive, 2, 1, "CaseInsensitive"))
+
+		seq.AppendChild(spec)
+	}
+	pdu.AppendChild(seq)
+
+	resp, err := c.sendPDU(pdu)
+	if err != nil {
+		return err
+	}
+
+	if resp.Tag != 44 {
+		return fmt.Errorf("unexpected sort response tag: %d", resp.Tag)
+	}
+	
+	// Check SortStatus [3] IMPLICIT INTEGER { success(0), partial-1(1), failure(2) }
+	for _, child := range resp.Children {
+		if child.Tag == 3 {
+			status := decodeInt(child)
+			if status != 0 {
+				return fmt.Errorf("sort failed with status: %d", status)
+			}
+		}
+	}
+
+	return nil
+}
+
 func (c *Client) DeleteResultSet(resultSetName string) error {
 	pdu := ber.Encode(ber.ClassContext, ber.TypeConstructed, 30, nil, "DeleteRequest")
 	pdu.AppendChild(ber.NewInteger(ber.ClassContext, ber.TypePrimitive, 32, 1, "DeleteAll"))

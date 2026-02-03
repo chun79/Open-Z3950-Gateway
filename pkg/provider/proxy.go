@@ -98,6 +98,14 @@ func (p *ProxyProvider) executeRemoteSearch(targetName string, query z3950.Struc
 		return nil, 0, config, friendlyError(targetName, "search", err)
 	}
 
+	// Perform Sort if requested
+	if len(query.SortKeys) > 0 && count > 0 {
+		if err := client.Sort("default", query.SortKeys); err != nil {
+			slog.Warn("sort failed", "target", targetName, "error", err)
+			// Don't fail the search, just log warning
+		}
+	}
+
 	return client, count, config, nil
 }
 
