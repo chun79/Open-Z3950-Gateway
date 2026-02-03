@@ -63,6 +63,7 @@
   "detail.publisher": "Publisher",
   "detail.edition": "Edition",
   "detail.isbn": "ISBN",
+  "detail.comments": "Comments / Notes",
   "detail.summary": "Summary",
   "detail.toc": "Table of Contents",
   "detail.physical": "Physical",

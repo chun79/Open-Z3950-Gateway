@@ -39,6 +39,7 @@ type ILLRequest struct {
 
 	Requestor string `json:"requestor"` // User ID or Name
 
+	Comments  string `json:"comments"` // User comments/notes
 }
 
 

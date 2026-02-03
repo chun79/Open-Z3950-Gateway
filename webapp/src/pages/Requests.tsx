@@ -122,6 +122,11 @@ export default function Requests() {
                     <td>
                       <strong>{req.title}</strong><br/>
                       <small>by {req.author} (ISBN: {req.isbn})</small>
+                      {req.comments && (
+                        <div style={{ marginTop: '5px', fontSize: '0.85em', color: '#666', fontStyle: 'italic' }}>
+                          📝 {req.comments}
+                        </div>
+                      )}
                     </td>
                     <td>{getStatusBadge(req.status)}</td>
                     {user?.role === 'admin' && <td>{req.requestor}</td>}

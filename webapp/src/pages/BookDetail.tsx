@@ -13,6 +13,7 @@ export default function BookDetail() {
   const [book, setBook] = useState<Book | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [comments, setComments] = useState('')
   const [requestStatus, setRequestStatus] = useState<{msg: string, type: 'success' | 'error'} | null>(null)
 
   useEffect(() => {
@@ -51,7 +52,8 @@ export default function BookDetail() {
           author: book.author,
           isbn: book.isbn,
           target_db: db || 'unknown',
-          record_id: book.record_id || id || 'unknown'
+          record_id: book.record_id || id || 'unknown',
+          comments: comments
         })
       })
 
@@ -152,6 +154,19 @@ export default function BookDetail() {
             {book.series && (
               <p><small>{t('detail.series')}: {book.series}</small></p>
             )}
+
+            <hr />
+            
+            <label htmlFor="comments">
+              {t('detail.comments')}
+              <textarea 
+                id="comments" 
+                value={comments} 
+                onChange={(e) => setComments(e.target.value)} 
+                placeholder="e.g. Need by Friday, Chapter 3 only..."
+                style={{ resize: 'vertical', minHeight: '80px' }}
+              />
+            </label>
 
             <footer>
               <div role="group">

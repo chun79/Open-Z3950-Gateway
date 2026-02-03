@@ -63,6 +63,7 @@
   "detail.publisher": "出版社",
   "detail.edition": "版次",
   "detail.isbn": "ISBN",
+  "detail.comments": "借阅备注",
   "detail.summary": "内容摘要",
   "detail.toc": "目录",
   "detail.physical": "物理形态",

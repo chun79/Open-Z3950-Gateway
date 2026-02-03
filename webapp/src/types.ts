@@ -32,4 +32,5 @@ export interface ILLRequest {
   isbn: string
   status: string
   requestor: string
+  comments?: string
 }

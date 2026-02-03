@@ -151,6 +151,7 @@ func NewSQLiteProvider(path string) (*SQLiteProvider, error) {
 	// Migration for new columns (ignore errors if they exist)
 	db.Exec("ALTER TABLE bibliography ADD COLUMN issn TEXT")
 	db.Exec("ALTER TABLE bibliography ADD COLUMN subjects TEXT")
+	db.Exec("ALTER TABLE ill_requests ADD COLUMN comments TEXT")
 
 	return &SQLiteProvider{db: db, profile: profile}, nil
 }
@@ -394,13 +395,13 @@ func (p *SQLiteProvider) Scan(db, field, startTerm string) ([]ScanResult, error)
 }
 
 func (p *SQLiteProvider) CreateILLRequest(req ILLRequest) error {
-	sqlStr := `INSERT INTO ill_requests (target_db, record_id, title, author, isbn, status, requestor) VALUES (?, ?, ?, ?, ?, ?, ?)`
-	_, err := p.db.Exec(sqlStr, req.TargetDB, req.RecordID, req.Title, req.Author, req.ISBN, req.Status, req.Requestor)
+	sqlStr := `INSERT INTO ill_requests (target_db, record_id, title, author, isbn, status, requestor, comments) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+	_, err := p.db.Exec(sqlStr, req.TargetDB, req.RecordID, req.Title, req.Author, req.ISBN, req.Status, req.Requestor, req.Comments)
 	return err
 }
 
 func (p *SQLiteProvider) ListILLRequests() ([]ILLRequest, error) {
-	rows, err := p.db.Query("SELECT id, target_db, record_id, title, author, isbn, status, requestor FROM ill_requests ORDER BY created_at DESC")
+	rows, err := p.db.Query("SELECT id, target_db, record_id, title, author, isbn, status, requestor, comments FROM ill_requests ORDER BY created_at DESC")
 	if err != nil {
 		return nil, err
 	}
@@ -409,8 +410,12 @@ func (p *SQLiteProvider) ListILLRequests() ([]ILLRequest, error) {
 	var requests []ILLRequest
 	for rows.Next() {
 		var r ILLRequest
-		if err := rows.Scan(&r.ID, &r.TargetDB, &r.RecordID, &r.Title, &r.Author, &r.ISBN, &r.Status, &r.Requestor); err != nil {
+		var comments sql.NullString
+		if err := rows.Scan(&r.ID, &r.TargetDB, &r.RecordID, &r.Title, &r.Author, &r.ISBN, &r.Status, &r.Requestor, &comments); err != nil {
 			return nil, err
+		}
+		if comments.Valid {
+			r.Comments = comments.String
 		}
 		requests = append(requests, r)
 	}
