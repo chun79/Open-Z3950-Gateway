@@ -28,6 +28,16 @@
 *   **ILL Workflow**: Integrated Request -> Review -> Approve/Reject workflow for inter-library loans.
 *   **Dynamic Targets**: Admins can add/configure remote Z39.50 servers via the UI without restarting.
 
+### 🔄 Inter-Library Loan (ILL) System
+The gateway includes a built-in ILL management system that bridges the gap between discovery and fulfillment:
+
+1.  **Discovery**: Users find items across multiple remote libraries (Z39.50 targets).
+2.  **Request**: One-click "Request Item" generates an ILL ticket populated with MARC metadata.
+3.  **Management**: 
+    *   **User Dashboard**: Track status of requested items (Pending/Approved/Rejected).
+    *   **Admin Console**: Review incoming requests, manage approvals, and handle fulfillment logistics.
+4.  **Protocol Agnostic**: While search relies on Z39.50, the ILL system is an internal workflow layer, allowing loans from any connected source.
+
 ## 🛠 Architecture
 
 ```mermaid
