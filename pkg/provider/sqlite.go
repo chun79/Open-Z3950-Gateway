@@ -107,6 +107,20 @@ func NewSQLiteProvider(path string) (*SQLiteProvider, error) {
 		return nil, fmt.Errorf("failed to create targets table: %w", err)
 	}
 
+	// Seed default targets if empty
+	var targetCount int
+	db.QueryRow("SELECT COUNT(*) FROM targets").Scan(&targetCount)
+	if targetCount == 0 {
+		seedTargets := []string{
+			"INSERT INTO targets (name, host, port, database_name, encoding) VALUES ('Library of Congress', 'lx2.loc.gov', 210, 'LCDB', 'MARC21')",
+			"INSERT INTO targets (name, host, port, database_name, encoding) VALUES ('LCDB', 'lx2.loc.gov', 210, 'LCDB', 'MARC21')", // Alias for webapp default
+			"INSERT INTO targets (name, host, port, database_name, encoding) VALUES ('Oxford University', 'library.ox.ac.uk', 210, 'MAIN_BIB', 'MARC21')",
+		}
+		for _, q := range seedTargets {
+			db.Exec(q)
+		}
+	}
+
 	// Ensure holdings table exists
 	createHoldingsTableSQL := `
 	CREATE TABLE IF NOT EXISTS holdings (

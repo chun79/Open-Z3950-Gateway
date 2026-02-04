@@ -65,7 +65,7 @@ func main() {
 	attrs.AppendChild(attr)
 	apt.AppendChild(attrs)
 	// Term
-	apt.AppendChild(ber.NewString(ber.ClassContext, ber.TypePrimitive, 45, "Go", "Term"))
+	apt.AppendChild(ber.NewString(ber.ClassContext, ber.TypePrimitive, 45, "java", "Term"))
 	op.AppendChild(apt)
 	rpn.AppendChild(op)
 
