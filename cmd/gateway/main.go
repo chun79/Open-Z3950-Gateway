@@ -1,25 +1,56 @@
 package main
 
 import (
+	"context"
 	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	ber "github.com/go-asn1-ber/asn1-ber"
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 	"github.com/yourusername/open-z3950-gateway/pkg/auth"
 	"github.com/yourusername/open-z3950-gateway/pkg/notify"
 	"github.com/yourusername/open-z3950-gateway/pkg/provider"
 	"github.com/yourusername/open-z3950-gateway/pkg/ui"
 	"github.com/yourusername/open-z3950-gateway/pkg/z3950"
+
+	_ "github.com/yourusername/open-z3950-gateway/docs" // Import generated docs
 )
+
+// @title           Open Z39.50 Gateway API
+// @version         1.0
+// @description     A modern Z39.50 Gateway with REST API and Web UI.
+// @termsOfService  http://swagger.io/terms/
+
+// @contact.name   API Support
+// @contact.url    http://www.swagger.io/support
+// @contact.email  support@swagger.io
+
+// @license.name  Apache 2.0
+// @license.url   http://www.apache.org/licenses/LICENSE-2.0.html
+
+// @host      localhost:8899
+// @BasePath  /api
+
+// @securityDefinitions.apikey ApiKeyAuth
+// @in header
+// @name X-API-Key
+
+// @securityDefinitions.apikey BearerAuth
+// @in header
+// @name Authorization
 
 // --- ZServer Definitions ---
 
@@ -146,7 +177,7 @@ func parseOperand(operand *ber.Packet) (z3950.QueryClause, error) {
 	if operand.Tag != 0 || operand.ClassType != ber.ClassContext {
 		return clause, fmt.Errorf("packet is not an operand")
 	}
-	
+
 	if len(operand.Children) == 0 {
 		return clause, fmt.Errorf("operand has no children")
 	}
@@ -171,68 +202,65 @@ func parseOperand(operand *ber.Packet) (z3950.QueryClause, error) {
 			clause.Term = string(child.Data.Bytes())
 		}
 	}
-	
+
 	if clause.Term == "" {
 		return clause, fmt.Errorf("could not find term in operand")
 	}
-	
+
 	return clause, nil
 }
 
 // recursiveParseRPN processes the RPN structure recursively
 func recursiveParseRPN(p *ber.Packet) (z3950.QueryNode, error) {
-	// Choice: Operand [0] or RPNRpnOp [1]
-	
 	if p.ClassType == ber.ClassContext && p.Tag == 0 {
 		// Operand
 		return parseOperand(p)
 	}
-	
+
 	if p.ClassType == ber.ClassContext && p.Tag == 1 {
 		// Complex (RPN1, RPN2, Op)
 		if len(p.Children) < 3 {
 			return nil, fmt.Errorf("complex RPN missing children")
 		}
-		
+
 		left, err := recursiveParseRPN(p.Children[0])
-		if err != nil { return nil, err }
-		
+		if err != nil {
+			return nil, err
+		}
+
 		right, err := recursiveParseRPN(p.Children[1])
-		if err != nil { return nil, err }
-		
+		if err != nil {
+			return nil, err
+		}
+
 		opNode := p.Children[2]
 		opStr := "AND"
 		if len(opNode.Children) > 0 {
 			if v, ok := opNode.Children[0].Value.(int64); ok {
 				switch v {
-				case 0: opStr = "AND"
-				case 1: opStr = "OR"
-				case 2: opStr = "AND-NOT"
+				case 0:
+					opStr = "AND"
+				case 1:
+					opStr = "OR"
+				case 2:
+					opStr = "AND-NOT"
 				}
 			}
 		}
-		
+
 		return z3950.QueryComplex{
 			Operator: opStr,
 			Left:     left,
 			Right:    right,
 		}, nil
 	}
-	
+
 	return nil, fmt.Errorf("unknown RPN tag: %d", p.Tag)
 }
 
 func parseRPNQuery(queryPacket *ber.Packet) (z3950.StructuredQuery, error) {
-	// Locate the RPNStructure inside the Query/RPNQuery wrapper
-	// Structure: Query [1] -> RPNQuery [Sequence] -> RPNStructure [Choice]
-	// Caller usually passes the Query [1] packet or its child.
-	// Let's assume input is Query packet.
-	
 	var rpnStruct *ber.Packet
-	
-	// Simplified logic: The RPN query usually has Bib-1 OID then the Structure.
-	// The Structure is the second child of RPNQuery sequence.
-	
+
 	if len(queryPacket.Children) > 0 {
 		// RPNQuery
 		rpnQuery := queryPacket.Children[0]
@@ -240,10 +268,8 @@ func parseRPNQuery(queryPacket *ber.Packet) (z3950.StructuredQuery, error) {
 			rpnStruct = rpnQuery.Children[1]
 		}
 	}
-	
+
 	if rpnStruct == nil {
-		// Fallback: Try to parse whatever we got
-		// This handles cases where caller stripped layers
 		if len(queryPacket.Children) > 0 {
 			rpnStruct = queryPacket.Children[0]
 		} else {
@@ -255,7 +281,7 @@ func parseRPNQuery(queryPacket *ber.Packet) (z3950.StructuredQuery, error) {
 	if err != nil {
 		return z3950.StructuredQuery{}, err
 	}
-	
+
 	return z3950.StructuredQuery{Root: root}, nil
 }
 
@@ -308,7 +334,7 @@ func (s *Server) handleSearch(conn net.Conn, connID string, req *ber.Packet) {
 		sess.DBName = dbName
 	}
 	s.mu.Unlock()
-	
+
 	slog.Info("search processed", "db", dbName, "found", len(ids))
 
 	resp := ber.Encode(ber.ClassContext, ber.TypeConstructed, TagSearchResponse, nil, "SearchResp")
@@ -322,41 +348,61 @@ func (s *Server) handleSearch(conn net.Conn, connID string, req *ber.Packet) {
 func (s *Server) handlePresent(conn net.Conn, connID string, req *ber.Packet) {
 	reqCount, startPoint := 1, 1
 	for _, c := range req.Children {
-		if c.Tag == 29 { if v, ok := c.Value.(int64); ok { reqCount = int(v) } }
-		if c.Tag == 30 { if v, ok := c.Value.(int64); ok { startPoint = int(v) } }
+		if c.Tag == 29 {
+			if v, ok := c.Value.(int64); ok {
+				reqCount = int(v)
+			}
+		}
+		if c.Tag == 30 {
+			if v, ok := c.Value.(int64); ok {
+				startPoint = int(v)
+			}
+		}
 	}
 
 	s.mu.RLock()
 	sess, ok := s.sessions[connID]
 	s.mu.RUnlock()
-	if !ok { return }
+	if !ok {
+		return
+	}
 
 	ids := sess.ResultIDs
 	startIdx := startPoint - 1
-	if startIdx < 0 { startIdx = 0 }
+	if startIdx < 0 {
+		startIdx = 0
+	}
 	endIdx := startIdx + reqCount
-	if endIdx > len(ids) { endIdx = len(ids) }
-	
+	if endIdx > len(ids) {
+		endIdx = len(ids)
+	}
+
 	var subsetIDs []string
-	if startIdx < len(ids) { subsetIDs = ids[startIdx:endIdx] }
-	
+	if startIdx < len(ids) {
+		subsetIDs = ids[startIdx:endIdx]
+	}
+
 	records, _ := s.provider.Fetch(sess.DBName, subsetIDs)
 	slog.Info("present processed", "conn_id", connID, "returned", len(records))
 
 	profile := &z3950.ProfileMARC21
-	if strings.Contains(strings.ToUpper(sess.DBName), "CNMARC") { profile = &z3950.ProfileCNMARC }
-	if strings.Contains(strings.ToUpper(sess.DBName), "UNIMARC") { profile = &z3950.ProfileUNIMARC }
+	if strings.Contains(strings.ToUpper(sess.DBName), "CNMARC") {
+		profile = &z3950.ProfileCNMARC
+	}
+	if strings.Contains(strings.ToUpper(sess.DBName), "UNIMARC") {
+		profile = &z3950.ProfileUNIMARC
+	}
 
 	resp := ber.Encode(ber.ClassContext, ber.TypeConstructed, TagPresentResponse, nil, "PresentResp")
 	resp.AppendChild(ber.NewString(ber.ClassContext, ber.TypePrimitive, 2, "ref", "RefId"))
 	resp.AppendChild(ber.NewInteger(ber.ClassContext, ber.TypePrimitive, 29, int64(len(records)), "Returned"))
 	resp.AppendChild(ber.NewInteger(ber.ClassContext, ber.TypePrimitive, 30, 0, "Next"))
 	resp.AppendChild(ber.NewInteger(ber.ClassContext, ber.TypePrimitive, 27, 0, "Status"))
-	
+
 	recordsWrapper := ber.Encode(ber.ClassContext, ber.TypeConstructed, 28, nil, "Records")
 	for _, rec := range records {
 		marcData := z3950.BuildMARC(profile, "", rec.GetTitle(profile), rec.GetAuthor(profile), rec.GetISBN(profile), rec.GetPublisher(profile), "", rec.GetISSN(profile), rec.GetSubject(profile))
-		
+
 		namePlusRecord := ber.Encode(ber.ClassUniversal, ber.TypeConstructed, ber.TagSequence, nil, "Record")
 		dbRecord := ber.Encode(ber.ClassContext, ber.TypeConstructed, 1, nil, "DBRecord")
 		octet := ber.NewString(ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, string(marcData), "MARC")
@@ -373,26 +419,31 @@ func (s *Server) handleScan(conn net.Conn, connID string, req *ber.Packet) {
 	var findTerm func(*ber.Packet)
 	findTerm = func(p *ber.Packet) {
 		if p.Tag == 45 {
-			if val, ok := p.Value.([]byte); ok { term = string(val) } else { term = string(p.Data.Bytes()) }
+			if val, ok := p.Value.([]byte); ok {
+				term = string(val)
+			} else {
+				term = string(p.Data.Bytes())
+			}
 		}
-		for _, c := range p.Children { findTerm(c) }
+		for _, c := range p.Children {
+			findTerm(c)
+		}
 	}
 	findTerm(req)
-	
-	// Default field for Z39.50 scan is often Title if not specified in attributes.
-	// For simplicity, we assume Title unless we parse attributes fully.
-	// (Real Z39.50 scan requests carry attributes just like search)
-	field := "title" 
+
+	field := "title"
 
 	s.mu.RLock()
 	sess, ok := s.sessions[connID]
 	s.mu.RUnlock()
 	dbName := "Default"
-	if ok { dbName = sess.DBName }
+	if ok {
+		dbName = sess.DBName
+	}
 
 	results, _ := s.provider.Scan(dbName, field, term)
 	slog.Info("scan processed", "term", term, "found", len(results))
-	
+
 	resp := ber.Encode(ber.ClassContext, ber.TypeConstructed, TagScanResponse, nil, "ScanResp")
 	resp.AppendChild(ber.NewInteger(ber.ClassUniversal, ber.TypePrimitive, ber.TagInteger, 0, "Step"))
 	resp.AppendChild(ber.NewInteger(ber.ClassUniversal, ber.TypePrimitive, ber.TagInteger, 0, "Status"))
@@ -412,6 +463,42 @@ func (s *Server) handleScan(conn net.Conn, connID string, req *ber.Packet) {
 	conn.Write(resp.Bytes())
 }
 
+// --- Error Handling ---
+
+type APIError struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+	Detail  string `json:"detail,omitempty"`
+}
+
+func (e *APIError) Error() string {
+	return fmt.Sprintf("[%d] %s: %s", e.Code, e.Message, e.Detail)
+}
+
+func AbortWithError(c *gin.Context, code int, message string, err error) {
+	detail := ""
+	if err != nil {
+		detail = err.Error()
+		if strings.Contains(detail, "i/o timeout") {
+			detail = "Connection timed out. The remote server might be down or blocked."
+		} else if strings.Contains(detail, "connection refused") {
+			detail = "Connection refused. The remote server is not accepting connections."
+		} else if strings.Contains(detail, "server rejected connection") {
+			detail = "Server rejected connection. Possible authentication or protocol issue."
+		}
+	}
+
+	slog.Error("api error", "path", c.Request.URL.Path, "status", code, "message", message, "error", err)
+
+	c.AbortWithStatusJSON(code, gin.H{
+		"status":  "error",
+		"error":   message,
+		"detail":  detail,
+		"code":    code,
+		"traceId": c.GetString("TraceID"),
+	})
+}
+
 // --- Gateway and Main Logic ---
 
 func initLogger() {
@@ -423,9 +510,8 @@ func initLogger() {
 
 func authMiddleware() gin.HandlerFunc {
 	requiredKey := os.Getenv("GATEWAY_API_KEY")
-	
+
 	return func(c *gin.Context) {
-		// 1. Check for legacy API Key (header or query)
 		apiKey := c.GetHeader("X-API-Key")
 		if apiKey == "" {
 			apiKey = c.Query("apikey")
@@ -437,7 +523,6 @@ func authMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		// 2. Check for JWT (Authorization: Bearer <token>)
 		authHeader := c.GetHeader("Authorization")
 		if authHeader != "" && strings.HasPrefix(authHeader, "Bearer ") {
 			tokenString := strings.TrimPrefix(authHeader, "Bearer ")
@@ -451,26 +536,68 @@ func authMiddleware() gin.HandlerFunc {
 			}
 		}
 
-		// 3. Unauthorized
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 			"error": "Unauthorized: Invalid API Key or Token",
 		})
 	}
 }
 
-// setupRouter initializes the Gin engine and routes
+// LoginRequest credentials
+type LoginRequest struct {
+	Username string `json:"username" binding:"required"`
+	Password string `json:"password" binding:"required"`
+}
+
+// LoginResponse auth token
+type LoginResponse struct {
+	Status string `json:"status"`
+	Token  string `json:"token"`
+	User   map[string]string `json:"user"`
+}
+
 func setupRouter(dbProvider provider.Provider) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Recovery())
-	
+
+	// --- 1. CORS Configuration ---
+	r.Use(cors.New(cors.Config{
+		AllowOrigins:     []string{"*"}, // Allow all for development
+		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Length", "Content-Type", "Authorization", "X-API-Key"},
+		ExposeHeaders:    []string{"Content-Length"},
+		AllowCredentials: true,
+		MaxAge:           12 * time.Hour,
+	}))
+
 	notifier := notify.NewLogNotifier()
 
+	// --- 2. Health Check ---
+	// @Summary Health Check
+	// @Description Checks if the server is running
+	// @Tags System
+	// @Produce json
+	// @Success 200 {object} map[string]interface{}
+	// @Router /health [get]
+	r.GET("/health", func(c *gin.Context) {
+		c.JSON(200, gin.H{"status": "UP", "time": time.Now()})
+	})
+
+	// Swagger UI
+	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+
 	// Public Auth Routes
+	
+	// @Summary Login
+	// @Description Authenticate user and get a JWT token
+	// @Tags Auth
+	// @Accept json
+	// @Produce json
+	// @Param credentials body LoginRequest true "Login Credentials"
+	// @Success 200 {object} LoginResponse
+	// @Failure 401 {object} APIError
+	// @Router /api/auth/login [post]
 	r.POST("/api/auth/login", func(c *gin.Context) {
-		var creds struct {
-			Username string `json:"username" binding:"required"`
-			Password string `json:"password" binding:"required"`
-		}
+		var creds LoginRequest
 		if err := c.BindJSON(&creds); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
 			return
@@ -493,24 +620,28 @@ func setupRouter(dbProvider provider.Provider) *gin.Engine {
 			return
 		}
 
-		c.JSON(200, gin.H{
-			"status": "success",
-			"token":  token,
-			"user":   gin.H{"username": user.Username, "role": user.Role},
+		c.JSON(200, LoginResponse{
+			Status: "success",
+			Token:  token,
+			User:   map[string]string{"username": user.Username, "role": user.Role},
 		})
 	})
 
+	// @Summary Register
+	// @Description Create a new user account
+	// @Tags Auth
+	// @Accept json
+	// @Produce json
+	// @Param credentials body LoginRequest true "User Credentials"
+	// @Success 201 {object} map[string]string
+	// @Router /api/auth/register [post]
 	r.POST("/api/auth/register", func(c *gin.Context) {
-		var req struct {
-			Username string `json:"username" binding:"required"`
-			Password string `json:"password" binding:"required"`
-		}
+		var req LoginRequest
 		if err := c.BindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
 			return
 		}
 
-		// Hash password here in the handler
 		hash, err := auth.HashPassword(req.Password)
 		if err != nil {
 			c.JSON(500, gin.H{"error": "Server error"})
@@ -536,95 +667,100 @@ func setupRouter(dbProvider provider.Provider) *gin.Engine {
 	api := r.Group("/api")
 	api.Use(authMiddleware())
 
+	// @Summary Search Books
+	// @Description Perform a Z39.50 search
+	// @Tags Search
+	// @Security ApiKeyAuth
+	// @Security BearerAuth
+	// @Produce json
+	// @Param query query string true "Search Term"
+	// @Param db query string false "Database Name"
+	// @Param attr1 query int false "Attribute Type (1=Use)"
+	// @Success 200 {object} map[string]interface{}
+	// @Router /api/search [get]
 	api.GET("/search", func(c *gin.Context) {
 		start := time.Now()
 		db := c.DefaultQuery("db", "LCDB")
 
-		// --- Parse URL parameters into a structured Tree (Left-associated) ---
 		var root z3950.QueryNode
-
-		// First term
 		term1 := c.Query("term1")
 		if term1 == "" {
-			term1 = c.Query("query") // Fallback for simple query
+			term1 = c.Query("query")
 		}
 		if term1 == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Missing query"})
 			return
 		}
-		
+
 		attr1Str := c.Query("attr1")
 		attr1 := z3950.UseAttributeAny
 		if attr1Str != "" {
 			attr1, _ = strconv.Atoi(attr1Str)
 		}
-		
+
 		root = z3950.QueryClause{Attribute: attr1, Term: term1}
 
-		// Subsequent terms
 		for i := 2; ; i++ {
 			termKey := fmt.Sprintf("term%d", i)
 			term, exists := c.GetQuery(termKey)
-			if !exists { break }
-			
+			if !exists {
+				break
+			}
+
 			attrKey := fmt.Sprintf("attr%d", i)
 			attrStr := c.Query(attrKey)
 			attr := z3950.UseAttributeAny
 			if attrStr != "" {
 				attr, _ = strconv.Atoi(attrStr)
 			}
-			
+
 			opKey := fmt.Sprintf("op%d", i)
 			operator := c.DefaultQuery(opKey, "AND")
-			
-			// Build tree: Complex(Root, NewClause)
+
 			root = z3950.QueryComplex{
 				Operator: operator,
 				Left:     root,
 				Right:    z3950.QueryClause{Attribute: attr, Term: term},
-			                        }
-			                }
-			
-			                // Parse Sort Options
-			                sortAttrStr := c.Query("sortAttr")
-			                sortOrderStr := c.Query("sortOrder") // "asc" or "desc"
-			                
-			                var sortKeys []z3950.SortKey
-			                if sortAttrStr != "" {
-			                        attr, _ := strconv.Atoi(sortAttrStr)
-			                        relation := 0 // Ascending
-			                        if sortOrderStr == "desc" {
-			                                relation = 1 // Descending
-			                        }
-			                        sortKeys = append(sortKeys, z3950.SortKey{Attribute: attr, Relation: relation})
-			                }
-			
-			                structuredQuery := z3950.StructuredQuery{Root: root, SortKeys: sortKeys}
-			                // --- END ---
-		// DIRECT CALL TO PROVIDER
+			}
+		}
+
+		sortAttrStr := c.Query("sortAttr")
+		sortOrderStr := c.Query("sortOrder")
+
+		var sortKeys []z3950.SortKey
+		if sortAttrStr != "" {
+			attr, _ := strconv.Atoi(sortAttrStr)
+			relation := 0 // Ascending
+			if sortOrderStr == "desc" {
+				relation = 1 // Descending
+			}
+			sortKeys = append(sortKeys, z3950.SortKey{Attribute: attr, Relation: relation})
+		}
+
+		structuredQuery := z3950.StructuredQuery{Root: root, SortKeys: sortKeys}
+
 		ids, err := dbProvider.Search(db, structuredQuery)
 		if err != nil {
-			slog.Error("provider search failed", "error", err)
-			c.JSON(500, gin.H{"error": "Search: " + err.Error()})
+			AbortWithError(c, http.StatusBadGateway, "Search failed", err)
 			return
 		}
 
 		records, err := dbProvider.Fetch(db, ids)
 		if err != nil {
-			slog.Error("provider fetch failed", "error", err)
-			c.JSON(500, gin.H{"error": "Fetch: " + err.Error()})
+			AbortWithError(c, http.StatusBadGateway, "Fetch failed", err)
 			return
 		}
 
 		results := make([]map[string]interface{}, 0)
 		for _, rec := range records {
 			if rec.Leader == "SUTRS" {
-				// Special handling for text records
 				txt := ""
-				if len(rec.Fields) > 0 { txt = rec.Fields[0].Value }
+				if len(rec.Fields) > 0 {
+					txt = rec.Fields[0].Value
+				}
 				results = append(results, map[string]interface{}{
-					"title": "Text Record",
-					"raw":   txt,
+					"title":  "Text Record",
+					"raw":    txt,
 					"format": "SUTRS",
 				})
 			} else {
@@ -663,24 +799,31 @@ func setupRouter(dbProvider provider.Provider) *gin.Engine {
 		})
 	})
 
+	// @Summary Get Book Details
+	// @Description Fetch full MARC record by ID
+	// @Tags Search
+	// @Security ApiKeyAuth
+	// @Produce json
+	// @Param db path string true "Database Name"
+	// @Param id path string true "Record ID"
+	// @Success 200 {object} map[string]interface{}
+	// @Router /api/books/{db}/{id} [get]
 	api.GET("/books/:db/:id", func(c *gin.Context) {
 		db := c.Param("db")
 		id := c.Param("id")
-		
+
 		records, err := dbProvider.Fetch(db, []string{id})
 		if err != nil {
-			slog.Error("failed to fetch book", "db", db, "id", id, "error", err)
-			c.JSON(500, gin.H{"error": "Fetch failed: " + err.Error()})
+			AbortWithError(c, http.StatusBadGateway, "Failed to fetch book details", err)
 			return
 		}
-		
+
 		if len(records) == 0 {
-			c.JSON(404, gin.H{"error": "Book not found"})
+			AbortWithError(c, http.StatusNotFound, "Book not found", nil)
 			return
 		}
-		
+
 		rec := records[0]
-		// Return friendly JSON
 		c.JSON(200, gin.H{
 			"status": "success",
 			"data": map[string]interface{}{
@@ -714,12 +857,11 @@ func setupRouter(dbProvider provider.Provider) *gin.Engine {
 		if req.Status == "" {
 			req.Status = "pending"
 		}
-		
-		// Use the username from the context (set by authMiddleware)
+
 		if username, exists := c.Get("username"); exists {
 			req.Requestor = username.(string)
 		} else {
-			req.Requestor = "anonymous" // Should not happen with authMiddleware
+			req.Requestor = "anonymous"
 		}
 
 		if err := dbProvider.CreateILLRequest(req); err != nil {
@@ -740,10 +882,9 @@ func setupRouter(dbProvider provider.Provider) *gin.Engine {
 			return
 		}
 
-		// Filter for regular users
 		role, _ := c.Get("role")
 		username, _ := c.Get("username")
-		
+
 		filtered := make([]provider.ILLRequest, 0)
 		if role == "admin" {
 			filtered = requests
@@ -767,12 +908,12 @@ func setupRouter(dbProvider provider.Provider) *gin.Engine {
 			c.JSON(500, gin.H{"error": "Failed to list targets"})
 			return
 		}
-		
+
 		names := make([]string, 0)
 		for _, t := range targets {
 			names = append(names, t.Name)
 		}
-		
+
 		c.JSON(200, gin.H{
 			"status": "success",
 			"data":   names,
@@ -819,7 +960,6 @@ func setupRouter(dbProvider provider.Provider) *gin.Engine {
 			return
 		}
 
-		// Fetch existing request to get details for notification
 		existingReq, err := dbProvider.GetILLRequest(id)
 		if err != nil {
 			c.JSON(404, gin.H{"error": "Request not found"})
@@ -833,14 +973,12 @@ func setupRouter(dbProvider provider.Provider) *gin.Engine {
 		}
 
 		slog.Info("ILL request status updated", "id", id, "status", body.Status)
-		
-		// Send Notification (Stub)
-		// We use the Requestor username as email for now, or a dummy email
+
 		toEmail := existingReq.Requestor
 		if !strings.Contains(toEmail, "@") {
 			toEmail = toEmail + "@example.com"
 		}
-		
+
 		go notifier.SendILLStatusUpdate(toEmail, existingReq.Title, body.Status, "Status updated by admin")
 
 		c.JSON(200, gin.H{"status": "success", "message": "Status updated"})
@@ -913,7 +1051,6 @@ func setupRouter(dbProvider provider.Provider) *gin.Engine {
 		c.JSON(200, gin.H{"status": "success", "message": "Target deleted"})
 	})
 
-	// Setup SPA (Single Page Application) serving
 	spaHandler := ui.SPAHandler()
 	r.NoRoute(func(c *gin.Context) {
 		spaHandler.ServeHTTP(c.Writer, c.Request)
@@ -933,7 +1070,6 @@ func main() {
 		slog.Info("self-test passed", "title", parsed.GetTitle(nil), "fields", len(parsed.Fields))
 	}
 
-	// 1. Initialize Provider
 	var dbProvider provider.Provider
 	var err error
 
@@ -961,46 +1097,69 @@ func main() {
 	}
 	slog.Info("database provider initialized successfully", "type", dbProviderType)
 
-	// Wrap with HybridProvider to support remote targets
-	hybridProvider := provider.NewHybridProvider(dbProvider)
-	// Update the main dbProvider variable to point to the hybrid one
-	dbProvider = hybridProvider
+	dbProvider = provider.NewHybridProvider(dbProvider)
 
-	// 2. Start Z39.50 Server in a goroutine
-	go func() {
-		zPort := os.Getenv("ZSERVER_PORT")
-		if zPort == "" {
-			zPort = "2100"
-		}
-		srv := NewServer(dbProvider) // Share the provider
-		listener, err := net.Listen("tcp", "0.0.0.0:"+zPort)
-		if err != nil {
-			slog.Error("failed to start Z39.50 listener", "error", err)
-			return // Don't panic main thread, but log error
-		}
+	// --- 3. Start Z39.50 Server ---
+	zPort := os.Getenv("ZSERVER_PORT")
+	if zPort == "" {
+		zPort = "2100"
+	}
+	srv := NewServer(dbProvider)
+	zListener, err := net.Listen("tcp", "0.0.0.0:"+zPort)
+	if err != nil {
+		slog.Error("failed to start Z39.50 listener", "error", err)
+	} else {
 		slog.Info("Z39.50 server starting", "port", zPort)
-
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				continue
+		go func() {
+			for {
+				conn, err := zListener.Accept()
+				if err != nil {
+					continue
+				}
+				if !srv.checkIP(conn.RemoteAddr()) {
+					conn.Close()
+					continue
+				}
+				go srv.handleConnection(conn)
 			}
-			if !srv.checkIP(conn.RemoteAddr()) {
-				conn.Close()
-				continue
-			}
-			go srv.handleConnection(conn)
-		}
-	}()
+		}()
+	}
 
-	// 3. Start HTTP Gateway
-	r := setupRouter(dbProvider)
-	
+	// --- 4. Start HTTP Gateway with Graceful Shutdown ---
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8899"
 	}
 
-	slog.Info("gateway starting", "addr", ":"+port)
-	r.Run(":" + port)
+	router := setupRouter(dbProvider)
+	httpSrv := &http.Server{
+		Addr:    ":" + port,
+		Handler: router,
+	}
+
+	go func() {
+		slog.Info("gateway starting", "addr", ":"+port)
+		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Error("gateway listen failed", "error", err)
+		}
+	}()
+
+	// Wait for interrupt signal to gracefully shutdown the server with
+	// a timeout of 5 seconds.
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	slog.Info("shutting down gateway...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := httpSrv.Shutdown(ctx); err != nil {
+		slog.Error("gateway forced to shutdown", "error", err)
+	}
+
+	if zListener != nil {
+		zListener.Close()
+	}
+
+	slog.Info("gateway exiting")
 }

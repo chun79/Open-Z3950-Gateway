@@ -17,18 +17,23 @@ const (
 )
 
 type Client struct {
-	conn net.Conn
-	host string
-	port int
+	conn    net.Conn
+	host    string
+	port    int
+	Timeout time.Duration
 }
 
 func NewClient(host string, port int) *Client {
-	return &Client{host: host, port: port}
+	return &Client{
+		host:    host,
+		port:    port,
+		Timeout: 30 * time.Second,
+	}
 }
 
 func (c *Client) Connect() error {
 	address := fmt.Sprintf("%s:%d", c.host, c.port)
-	conn, err := net.DialTimeout("tcp", address, 10*time.Second)
+	conn, err := net.DialTimeout("tcp", address, c.Timeout)
 	if err != nil {
 		return err
 	}
@@ -38,6 +43,8 @@ func (c *Client) Connect() error {
 
 func (c *Client) Close() {
 	if c.conn != nil {
+		// Attempt to send Close PDU, but don't block for long
+		c.conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
 		pdu := ber.Encode(ber.ClassContext, ber.TypeConstructed, 48, nil, "Close")
 		pdu.AppendChild(ber.NewInteger(ber.ClassContext, ber.TypePrimitive, 211, 0, "Reason"))
 		c.conn.Write(pdu.Bytes())
@@ -46,6 +53,10 @@ func (c *Client) Close() {
 }
 
 func (c *Client) sendPDU(pdu *ber.Packet) (*ber.Packet, error) {
+	if c.Timeout > 0 {
+		c.conn.SetDeadline(time.Now().Add(c.Timeout))
+	}
+
 	data := pdu.Bytes()
 	slog.Info("sending PDU", "hex", fmt.Sprintf("%X", data))
 	if _, err := c.conn.Write(data); err != nil {
