@@ -17,17 +17,20 @@ services:
       - PORT=8899
       - GATEWAY_API_KEY=${GATEWAY_API_KEY:-123456}
       - ZSERVER_ALLOWED_IPS=${ZSERVER_ALLOWED_IPS:-0.0.0.0/0}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317 # Send traces to Jaeger
     volumes:
       - ./data/gateway:/app/data
     depends_on:
       postgres-db:
         condition: service_healthy
-        required: false # Only required if DB_PROVIDER=postgres
+        required: false
+      jaeger:
+        condition: service_started
 
   postgres-db:
     image: postgres:15-alpine
     container_name: z3950-postgres
-    profiles: ["with-postgres"] # Only starts if requested
+    profiles: ["with-postgres"]
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-example}
@@ -39,6 +42,15 @@ services:
       retries: 5
     volumes:
       - ./data/postgres:/var/lib/postgresql/data
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: z3950-jaeger
+    ports:
+      - "16686:16686" # Jaeger UI
+      - "4317:4317"   # OTLP gRPC
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
 
 volumes:
   gateway-data:

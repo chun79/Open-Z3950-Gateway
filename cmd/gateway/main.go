@@ -18,12 +18,14 @@ import (
 	ber "github.com/go-asn1-ber/asn1-ber"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 	"github.com/yourusername/open-z3950-gateway/pkg/auth"
 	"github.com/yourusername/open-z3950-gateway/pkg/notify"
 	"github.com/yourusername/open-z3950-gateway/pkg/provider"
 	"github.com/yourusername/open-z3950-gateway/pkg/sip2"
+	"github.com/yourusername/open-z3950-gateway/pkg/telemetry"
 	"github.com/yourusername/open-z3950-gateway/pkg/ui"
 	"github.com/yourusername/open-z3950-gateway/pkg/z3950"
 
@@ -417,82 +419,43 @@ func (s *Server) handlePresent(conn net.Conn, connID string, req *ber.Packet) {
 }
 
 func (s *Server) handleScan(conn net.Conn, connID string, req *ber.Packet) {
-
 	term := ""
-
 	opts := z3950.ScanOptions{
-
 		Count:          10, // Default if not found
-
 		StepSize:       0,
-
 		PositionOfTerm: 1,
-
 	}
-
-
 
 	var walk func(*ber.Packet)
-
 	walk = func(p *ber.Packet) {
-
 		if p.Tag == 45 { // Term
-
 			if val, ok := p.Value.([]byte); ok { term = string(val) } else { term = string(p.Data.Bytes()) }
-
 		}
-
 		if p.Tag == 31 { // NumberOfTermsRequested
-
 			if v, ok := p.Value.(int64); ok { opts.Count = int(v) }
-
 		}
-
 		if p.Tag == 32 { // StepSize
-
 			if v, ok := p.Value.(int64); ok { opts.StepSize = int(v) }
-
 		}
-
 		if p.Tag == 33 { // PositionOfTerm
-
 			if v, ok := p.Value.(int64); ok { opts.PositionOfTerm = int(v) }
-
 		}
-
 		for _, c := range p.Children { walk(c) }
-
 	}
-
 	walk(req)
-
-
 
 	field := "title"
 
-
-
 	s.mu.RLock()
-
 	sess, ok := s.sessions[connID]
-
 	s.mu.RUnlock()
-
 	dbName := "Default"
-
 	if ok {
-
 		dbName = sess.DBName
-
 	}
 
-
-
 	results, _ := s.provider.Scan(dbName, field, term, opts)
-
 	slog.Info("scan processed", "term", term, "found", len(results))
-
-
 
 	resp := ber.Encode(ber.ClassContext, ber.TypeConstructed, TagScanResponse, nil, "ScanResp")
 	resp.AppendChild(ber.NewInteger(ber.ClassUniversal, ber.TypePrimitive, ber.TagInteger, 0, "Step"))
@@ -608,6 +571,9 @@ type LoginResponse struct {
 func setupRouter(dbProvider provider.Provider) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Recovery())
+	
+	// --- 0. OpenTelemetry Middleware ---
+	r.Use(otelgin.Middleware("gateway"))
 
 	// --- 1. CORS Configuration ---
 	r.Use(cors.New(cors.Config{
@@ -927,6 +893,119 @@ func setupRouter(dbProvider provider.Provider) *gin.Engine {
 		})
 	})
 
+	// @Summary Federated Search
+	// @Description Search multiple targets concurrently and return aggregated records
+	// @Tags Search
+	// @Security ApiKeyAuth
+	// @Security BearerAuth
+	// @Produce json
+	// @Param query query string true "Search Term"
+	// @Param targets query string true "Comma-separated list of target names (e.g. 'LCDB,Oxford')"
+	// @Param limit query int false "Max records per target"
+	// @Success 200 {object} map[string]interface{}
+	// @Router /api/federated-search [get]
+	api.GET("/federated-search", func(c *gin.Context) {
+		start := time.Now()
+		targetsStr := c.Query("targets")
+		queryTerm := c.Query("query")
+		if targetsStr == "" || queryTerm == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Missing 'targets' or 'query' parameter"})
+			return
+		}
+
+		limit := 5 // Default 5 records per target to keep it fast
+		if l := c.Query("limit"); l != "" {
+			if v, err := strconv.Atoi(l); err == nil && v > 0 {
+				limit = v
+			}
+		}
+
+		targetList := strings.Split(targetsStr, ",")
+		
+		// Prepare concurrency
+		var wg sync.WaitGroup
+		resultsChan := make(chan map[string]interface{}, len(targetList)*limit)
+		
+		// Construct the Z39.50 query structure once (simple query)
+		// For now federated search supports simple Term query on Attribute=Any (or Title)
+		zQuery := z3950.StructuredQuery{
+			Root: z3950.QueryClause{Attribute: z3950.UseAttributeAny, Term: queryTerm},
+		}
+
+		for _, dbName := range targetList {
+			dbName = strings.TrimSpace(dbName)
+			if dbName == "" { continue }
+
+			wg.Add(1)
+			go func(target string) {
+				defer wg.Done()
+				
+				// 1. Search
+				ids, err := dbProvider.Search(target, zQuery)
+				if err != nil {
+					slog.Warn("federated search error", "target", target, "error", err)
+					return
+				}
+
+				if len(ids) == 0 {
+					return
+				}
+
+				// 2. Limit fetch
+				fetchCount := limit
+				if len(ids) < fetchCount { fetchCount = len(ids) }
+				idsToFetch := ids[:fetchCount]
+
+				// 3. Fetch Records
+				records, err := dbProvider.Fetch(target, idsToFetch)
+				if err != nil {
+					slog.Warn("federated fetch error", "target", target, "error", err)
+					return
+				}
+
+				// 4. Convert to JSON
+				for _, rec := range records {
+					res := map[string]interface{}{
+						"source_target": target, // Tag the source
+						"record_id":     rec.RecordID,
+						"title":         rec.GetTitle(nil),
+						"author":        rec.GetAuthor(nil),
+						"isbn":          rec.GetISBN(nil),
+						"publisher":     rec.GetPublisher(nil),
+						"year":          rec.GetPubYear(nil), // Simplified field
+					}
+					resultsChan <- res
+				}
+			}(dbName)
+		}
+
+		// Wait and close
+		go func() {
+			wg.Wait()
+			close(resultsChan)
+		}()
+
+		// Collect results
+		aggregated := make([]map[string]interface{}, 0)
+		for res := range resultsChan {
+			aggregated = append(aggregated, res)
+		}
+
+		elapsed := time.Since(start)
+		slog.Info("federated search completed", 
+			"targets", len(targetList), 
+			"total_found", len(aggregated),
+			"latency_ms", elapsed.Milliseconds(),
+		)
+
+		c.JSON(200, gin.H{
+			"status": "success",
+			"count":  len(aggregated),
+			"data":   aggregated,
+			"time_ms": elapsed.Milliseconds(),
+		})
+	})
+
 	// @Summary Get Book Details
 	// @Description Fetch full MARC record by ID
 	// @Tags Search
@@ -1088,118 +1167,6 @@ func setupRouter(dbProvider provider.Provider) *gin.Engine {
 		})
 	})
 
-	// @Summary Federated Search
-	// @Description Search multiple targets concurrently and return aggregated records
-	// @Tags Search
-	// @Security ApiKeyAuth
-	// @Security BearerAuth
-	// @Produce json
-	// @Param query query string true "Search Term"
-	// @Param targets query string true "Comma-separated list of target names (e.g. 'LCDB,Oxford')"
-	// @Param limit query int false "Max records per target"
-	// @Success 200 {object} map[string]interface{}
-	// @Router /api/federated-search [get]
-	api.GET("/federated-search", func(c *gin.Context) {
-		start := time.Now()
-		targetsStr := c.Query("targets")
-		queryTerm := c.Query("query")
-		if targetsStr == "" || queryTerm == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Missing 'targets' or 'query' parameter"})
-			return
-		}
-
-		limit := 5 // Default 5 records per target to keep it fast
-		if l := c.Query("limit"); l != "" {
-			if v, err := strconv.Atoi(l); err == nil && v > 0 {
-				limit = v
-			}
-		}
-
-		targetList := strings.Split(targetsStr, ",")
-		
-		// Prepare concurrency
-		var wg sync.WaitGroup
-		resultsChan := make(chan map[string]interface{}, len(targetList)*limit)
-		
-		// Construct the Z39.50 query structure once (simple query)
-		// For now federated search supports simple Term query on Attribute=Any (or Title)
-		zQuery := z3950.StructuredQuery{
-			Root: z3950.QueryClause{Attribute: z3950.UseAttributeAny, Term: queryTerm},
-		}
-
-		for _, dbName := range targetList {
-			dbName = strings.TrimSpace(dbName)
-			if dbName == "" { continue }
-
-			wg.Add(1)
-			go func(target string) {
-				defer wg.Done()
-				
-				// 1. Search
-				ids, err := dbProvider.Search(target, zQuery)
-				if err != nil {
-					slog.Warn("federated search error", "target", target, "error", err)
-					return
-				}
-
-				if len(ids) == 0 {
-					return
-				}
-
-				// 2. Limit fetch
-				fetchCount := limit
-				if len(ids) < fetchCount { fetchCount = len(ids) }
-				idsToFetch := ids[:fetchCount]
-
-				// 3. Fetch Records
-				records, err := dbProvider.Fetch(target, idsToFetch)
-				if err != nil {
-					slog.Warn("federated fetch error", "target", target, "error", err)
-					return
-				}
-
-				// 4. Convert to JSON
-				for _, rec := range records {
-					res := map[string]interface{}{
-						"source_target": target, // Tag the source
-						"record_id":     rec.RecordID,
-						"title":         rec.GetTitle(nil),
-						"author":        rec.GetAuthor(nil),
-						"isbn":          rec.GetISBN(nil),
-						"publisher":     rec.GetPublisher(nil),
-						"year":          rec.GetPubYear(nil), // Simplified field
-					}
-					resultsChan <- res
-				}
-			}(dbName)
-		}
-
-		// Wait and close
-		go func() {
-			wg.Wait()
-			close(resultsChan)
-		}()
-
-		// Collect results
-		aggregated := make([]map[string]interface{}, 0)
-		for res := range resultsChan {
-			aggregated = append(aggregated, res)
-		}
-
-		elapsed := time.Since(start)
-		slog.Info("federated search completed", 
-			"targets", len(targetList), 
-			"total_found", len(aggregated),
-			"latency_ms", elapsed.Milliseconds())
-
-		c.JSON(200, gin.H{
-			"status": "success",
-			"count":  len(aggregated),
-			"data":   aggregated,
-			"time_ms": elapsed.Milliseconds(),
-		})
-	})
-
 	api.PUT("/ill-requests/:id/status", func(c *gin.Context) {
 		idStr := c.Param("id")
 		id, err := strconv.ParseInt(idStr, 10, 64)
@@ -1316,6 +1283,14 @@ func setupRouter(dbProvider provider.Provider) *gin.Engine {
 }
 
 func main() {
+	// Initialize Tracer
+	shutdownTracer, err := telemetry.InitTracer(context.Background(), "gateway-service")
+	if err != nil {
+		slog.Warn("failed to init tracer", "error", err)
+	} else {
+		defer shutdownTracer(context.Background())
+	}
+
 	initLogger()
 
 	slog.Info("running MARC self-test")
@@ -1327,7 +1302,6 @@ func main() {
 	}
 
 	var dbProvider provider.Provider
-	var err error
 
 	dbProviderType := os.Getenv("DB_PROVIDER")
 	slog.Info("initializing database provider", "type", dbProviderType)
