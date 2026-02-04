@@ -649,6 +649,102 @@ func (p *SQLiteProvider) GetDashboardStats() (map[string]interface{}, error) {
 	return stats, nil
 }
 
+// --- Discovery & Patron Implementation ---
+
+func (p *SQLiteProvider) GetNewArrivals(limit int) ([]SearchResult, error) {
+	rows, err := p.db.Query(`
+		SELECT id, title, author, isbn, publisher, pub_year, subjects 
+		FROM bibliography ORDER BY id DESC LIMIT ?`, limit)
+	if err != nil { return nil, err }
+	defer rows.Close()
+
+	var results []SearchResult
+	for rows.Next() {
+		var r SearchResult
+		var id int64
+		if err := rows.Scan(&id, &r.Title, &r.Author, &r.ISBN, &r.Publisher, &r.PubYear, &r.Subject); err == nil {
+			r.ID = fmt.Sprintf("%d", id)
+			results = append(results, r)
+		}
+	}
+	return results, nil
+}
+
+func (p *SQLiteProvider) GetPopularBooks(limit int) ([]SearchResult, error) {
+	// Simple heuristic: books with most items? Or books with items currently checked out?
+	// Better: Count loans per bib_id.
+	rows, err := p.db.Query(`
+		SELECT b.id, b.title, b.author, b.isbn, COUNT(l.id) as loan_count
+		FROM bibliography b
+		JOIN items i ON i.bib_id = b.id
+		JOIN loans l ON l.item_id = i.id
+		GROUP BY b.id
+		ORDER BY loan_count DESC
+		LIMIT ?`, limit)
+	
+	if err != nil { return nil, err }
+	defer rows.Close()
+
+	var results []SearchResult
+	for rows.Next() {
+		var r SearchResult
+		var id int64
+		var count int
+		if err := rows.Scan(&id, &r.Title, &r.Author, &r.ISBN, &count); err == nil {
+			r.ID = fmt.Sprintf("%d", id)
+			results = append(results, r)
+		}
+	}
+	return results, nil
+}
+
+func (p *SQLiteProvider) RenewLoan(loanID int64) (string, error) {
+	// Check if overdue? Allow anyway but keep fine?
+	// Simple logic: Extend due date by 30 days from NOW (or from old due date?)
+	newDueDate := time.Now().Add(30 * 24 * time.Hour)
+	_, err := p.db.Exec("UPDATE loans SET due_date = ? WHERE id = ? AND status = 'active'", newDueDate, loanID)
+	return newDueDate.Format(time.RFC3339), err
+}
+
+func (p *SQLiteProvider) PlaceHold(bibID string, patronID string) error {
+	// Just log it for now or reuse ILL table with different status?
+	// Let's reuse ILL table with target_db='HOLD'
+	return p.CreateILLRequest(ILLRequest{
+		TargetDB: "HOLD",
+		RecordID: bibID,
+		Status:   "pending_hold",
+		Requestor: patronID,
+	})
+}
+
+func (p *SQLiteProvider) GetPatronLoans(patronID string) ([]map[string]interface{}, error) {
+	rows, err := p.db.Query(`
+		SELECT l.id, b.title, b.author, l.due_date, i.barcode
+		FROM loans l
+		JOIN items i ON l.item_id = i.id
+		JOIN bibliography b ON i.bib_id = b.id
+		WHERE l.patron_id = ? AND l.status = 'active'`, patronID)
+	if err != nil { return nil, err }
+	defer rows.Close()
+
+	var loans []map[string]interface{}
+	for rows.Next() {
+		var id int64
+		var title, author, barcode string
+		var due time.Time
+		if err := rows.Scan(&id, &title, &author, &due, &barcode); err == nil {
+			loans = append(loans, map[string]interface{}{
+				"id": id,
+				"title": title,
+				"author": author,
+				"due_date": due,
+				"barcode": barcode,
+			})
+		}
+	}
+	return loans, nil
+}
+
 func (p *SQLiteProvider) CreateUser(user *User) error {
 	_, err := p.db.Exec("INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)", user.Username, user.PasswordHash, user.Role)
 	return err

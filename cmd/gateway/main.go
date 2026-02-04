@@ -746,6 +746,31 @@ func setupRouter(dbProvider provider.Provider) *gin.Engine {
 	api := r.Group("/api")
 	api.Use(authMiddleware())
 
+	// --- Discovery APIs (LSP Phase 5) ---
+	api.GET("/discovery/new", func(c *gin.Context) {
+		limit := 10
+		if l, err := strconv.Atoi(c.Query("limit")); err == nil && l > 0 { limit = l }
+		
+		results, err := dbProvider.GetNewArrivals(limit)
+		if err != nil {
+			c.JSON(500, gin.H{"error": "Failed to fetch new arrivals"})
+			return
+		}
+		c.JSON(200, gin.H{"status": "success", "data": results})
+	})
+
+	api.GET("/discovery/popular", func(c *gin.Context) {
+		limit := 10
+		if l, err := strconv.Atoi(c.Query("limit")); err == nil && l > 0 { limit = l }
+		
+		results, err := dbProvider.GetPopularBooks(limit)
+		if err != nil {
+			c.JSON(500, gin.H{"error": "Failed to fetch popular books"})
+			return
+		}
+		c.JSON(200, gin.H{"status": "success", "data": results})
+	})
+
 	// --- Cataloging APIs (LSP) ---
 	api.POST("/books", func(c *gin.Context) {
 		var rec z3950.MARCRecord

@@ -249,6 +249,14 @@ func (p *ProxyProvider) GetItemByBarcode(barcode string) (*Item, error) { return
 func (p *ProxyProvider) Checkout(itemBarcode, patronID string) (string, error) { return "", fmt.Errorf("proxy is read-only") }
 func (p *ProxyProvider) Checkin(itemBarcode string) (float64, error) { return 0, fmt.Errorf("proxy is read-only") }
 
+// --- Discovery & Patron Stubs ---
+func (p *ProxyProvider) GetDashboardStats() (map[string]interface{}, error) { return nil, nil }
+func (p *ProxyProvider) GetNewArrivals(limit int) ([]SearchResult, error) { return nil, nil }
+func (p *ProxyProvider) GetPopularBooks(limit int) ([]SearchResult, error) { return nil, nil }
+func (p *ProxyProvider) RenewLoan(loanID int64) (string, error) { return "", fmt.Errorf("not implemented") }
+func (p *ProxyProvider) PlaceHold(bibID string, patronID string) error { return fmt.Errorf("not implemented") }
+func (p *ProxyProvider) GetPatronLoans(patronID string) ([]map[string]interface{}, error) { return nil, nil }
+
 // Stub implementations for unsupported methods
 func (p *ProxyProvider) CreateILLRequest(req ILLRequest) error {
 	return fmt.Errorf("proxy provider does not support creating ILL requests locally")

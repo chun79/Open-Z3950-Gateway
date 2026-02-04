@@ -92,6 +92,17 @@ type Provider interface {
 
 	GetDashboardStats() (map[string]interface{}, error)
 
+	// --- Discovery Layer (OPAC) ---
+
+	GetNewArrivals(limit int) ([]SearchResult, error)
+	GetPopularBooks(limit int) ([]SearchResult, error)
+
+	// --- Patron Actions ---
+
+	RenewLoan(loanID int64) (string, error) // Returns new due date
+	PlaceHold(bibID string, patronID string) error
+	GetPatronLoans(patronID string) ([]map[string]interface{}, error)
+
 	// --- Index Browsing ---
 
 	// Scan browses the index.

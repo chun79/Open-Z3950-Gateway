@@ -64,6 +64,12 @@ func (h *HybridProvider) GetDashboardStats() (map[string]interface{}, error) {
 	return h.local.GetDashboardStats()
 }
 
+func (h *HybridProvider) GetNewArrivals(limit int) ([]SearchResult, error) { return h.local.GetNewArrivals(limit) }
+func (h *HybridProvider) GetPopularBooks(limit int) ([]SearchResult, error) { return h.local.GetPopularBooks(limit) }
+func (h *HybridProvider) RenewLoan(loanID int64) (string, error) { return h.local.RenewLoan(loanID) }
+func (h *HybridProvider) PlaceHold(bibID string, patronID string) error { return h.local.PlaceHold(bibID, patronID) }
+func (h *HybridProvider) GetPatronLoans(patronID string) ([]map[string]interface{}, error) { return h.local.GetPatronLoans(patronID) }
+
 func (h *HybridProvider) Scan(db, field, startTerm string, opts z3950.ScanOptions) ([]ScanResult, error) {
 	if h.isLocalDB(db) {
 		return h.local.Scan(db, field, startTerm, opts)
