@@ -23,6 +23,7 @@ import (
 	"github.com/yourusername/open-z3950-gateway/pkg/auth"
 	"github.com/yourusername/open-z3950-gateway/pkg/notify"
 	"github.com/yourusername/open-z3950-gateway/pkg/provider"
+	"github.com/yourusername/open-z3950-gateway/pkg/sip2"
 	"github.com/yourusername/open-z3950-gateway/pkg/ui"
 	"github.com/yourusername/open-z3950-gateway/pkg/z3950"
 
@@ -634,10 +635,80 @@ func setupRouter(dbProvider provider.Provider) *gin.Engine {
 	// --- 3. gRPC / ConnectRPC Handler ---
 	gatewayServer := NewGatewayServer(dbProvider)
 	path, handler := gatewayv1connect.NewGatewayServiceHandler(gatewayServer)
-	// Mount the Connect handler. Since Connect uses HTTP/2 streaming, this works best with direct http.Server,
-	// but Gin can wrap it for H1/H2C. 
-	// Connect handles its own CORS if configured, or inherits parent.
 	r.Any(path+"*any", gin.WrapH(handler))
+
+	// --- 4. SIP2 Client Setup ---
+	sipHost := os.Getenv("SIP2_HOST")
+	sipPort := os.Getenv("SIP2_PORT")
+	
+	// Start Mock Server if requested or if no host provided
+	if os.Getenv("SIP2_MOCK") == "true" || sipHost == "" {
+		slog.Info("Starting Mock SIP2 Server on :6001")
+		mock := sip2.NewMockServer(6001)
+		mock.Start()
+		sipHost = "localhost"
+		sipPort = "6001"
+	}
+
+	var sipClient *sip2.SIP2Client
+	if sipHost != "" {
+		port, _ := strconv.Atoi(sipPort)
+		sipClient = sip2.NewClient(sipHost, port)
+		sipClient.Location = "MainBranch" // Default
+	}
+
+	// ILS Routes
+	ils := r.Group("/api/ils")
+	ils.POST("/login", func(c *gin.Context) {
+		if sipClient == nil {
+			c.JSON(503, gin.H{"error": "ILS integration not configured"})
+			return
+		}
+		var req struct {
+			Barcode  string `json:"barcode"`
+			Password string `json:"password"`
+		}
+		if err := c.BindJSON(&req); err != nil {
+			c.JSON(400, gin.H{"error": "Invalid request"})
+			return
+		}
+
+		if err := sipClient.Connect(); err != nil {
+			c.JSON(500, gin.H{"error": "Failed to connect to ILS"})
+			return
+		}
+		defer sipClient.Close()
+
+		ok, err := sipClient.Login(req.Barcode, req.Password, "MainBranch")
+		if err != nil || !ok {
+			c.JSON(401, gin.H{"error": "Invalid barcode or password"})
+			return
+		}
+
+		c.JSON(200, gin.H{"status": "success", "message": "Logged in to Library System"})
+	})
+
+	ils.GET("/profile", func(c *gin.Context) {
+		if sipClient == nil {
+			c.JSON(503, gin.H{"error": "ILS integration not configured"})
+			return
+		}
+		barcode := c.Query("barcode") // In real app, get from JWT context
+		
+		if err := sipClient.Connect(); err != nil {
+			c.JSON(500, gin.H{"error": "Failed to connect to ILS"})
+			return
+		}
+		defer sipClient.Close()
+
+		info, err := sipClient.GetPatronInfo(barcode, "")
+		if err != nil {
+			c.JSON(500, gin.H{"error": "Failed to fetch profile: " + err.Error()})
+			return
+		}
+
+		c.JSON(200, gin.H{"status": "success", "data": info})
+	})
 
 	// Swagger UI
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
