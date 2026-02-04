@@ -5,6 +5,7 @@ import Requests from './pages/Requests'
 import Browse from './pages/Browse'
 import Login from './pages/Login'
 import Settings from './pages/Settings'
+import AdminDashboard from './pages/AdminDashboard'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { I18nProvider, useI18n } from './context/I18nContext'
 import { ThemeProvider, useTheme } from './context/ThemeContext'
@@ -58,11 +59,18 @@ function Navigation() {
               </NavLink>
             </li>
             {user?.role === 'admin' && (
-              <li>
-                <NavLink to="/settings" role="button" className={({ isActive }) => isActive ? '' : 'outline'}>
-                  {t('nav.settings')}
-                </NavLink>
-              </li>
+              <>
+                <li>
+                  <NavLink to="/admin" role="button" className={({ isActive }) => isActive ? '' : 'outline'}>
+                    Dashboard
+                  </NavLink>
+                </li>
+                <li>
+                  <NavLink to="/settings" role="button" className={({ isActive }) => isActive ? '' : 'outline'}>
+                    {t('nav.settings')}
+                  </NavLink>
+                </li>
+              </>
             )}
             <li>
               <button 
@@ -109,6 +117,7 @@ function App() {
                   <Route path="/browse" element={<ProtectedRoute><Browse /></ProtectedRoute>} />
                   <Route path="/requests" element={<ProtectedRoute><Requests /></ProtectedRoute>} />
                   <Route path="/settings" element={<AdminRoute><Settings /></AdminRoute>} />
+                  <Route path="/admin" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
                 </Routes>
               </main>
             </div>
