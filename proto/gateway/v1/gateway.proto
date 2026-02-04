@@ -1,0 +1,75 @@
+syntax = "proto3";
+
+package gateway.v1;
+
+option go_package = "github.com/yourusername/open-z3950-gateway/gen/proto/gateway/v1;gatewayv1";
+
+// The Gateway Service definition.
+service GatewayService {
+  // Search performs a Z39.50 search.
+  // It streams results back as they are found from different targets.
+  rpc Search(SearchRequest) returns (stream SearchResponse);
+
+  // GetBook fetches details for a specific record.
+  rpc GetBook(GetBookRequest) returns (GetBookResponse);
+
+  // Login authenticates a user.
+  rpc Login(LoginRequest) returns (LoginResponse);
+}
+
+message SearchRequest {
+  string query = 1;
+  repeated string targets = 2; // List of DB names like "LCDB", "Oxford"
+  int32 limit = 3;             // Max records per target
+}
+
+message SearchResponse {
+  // One of the following will be set
+  oneof result {
+    SearchResult record = 1;
+    SearchStatus status = 2;
+  }
+}
+
+message SearchResult {
+  string title = 1;
+  string author = 2;
+  string isbn = 3;
+  string publisher = 4;
+  string year = 5;
+  string source_target = 6;
+  string record_id = 7;
+}
+
+message SearchStatus {
+  string target = 1;
+  bool success = 2;
+  string message = 3; // e.g. "Found 10 records" or "Connection timeout"
+}
+
+message GetBookRequest {
+  string db = 1;
+  string record_id = 2;
+}
+
+message GetBookResponse {
+  string title = 1;
+  string author = 2;
+  string isbn = 3;
+  string publisher = 4;
+  string summary = 5;
+  string physical = 6;
+  string series = 7;
+  string notes = 8;
+  repeated string subjects = 9;
+}
+
+message LoginRequest {
+  string username = 1;
+  string password = 2;
+}
+
+message LoginResponse {
+  string token = 1;
+  string role = 2;
+}

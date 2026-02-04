@@ -27,6 +27,7 @@ import (
 	"github.com/yourusername/open-z3950-gateway/pkg/z3950"
 
 	_ "github.com/yourusername/open-z3950-gateway/docs" // Import generated docs
+	"github.com/yourusername/open-z3950-gateway/gen/proto/gateway/v1/gatewayv1connect"
 )
 
 // @title           Open Z39.50 Gateway API
@@ -581,6 +582,14 @@ func setupRouter(dbProvider provider.Provider) *gin.Engine {
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "UP", "time": time.Now()})
 	})
+
+	// --- 3. gRPC / ConnectRPC Handler ---
+	gatewayServer := NewGatewayServer(dbProvider)
+	path, handler := gatewayv1connect.NewGatewayServiceHandler(gatewayServer)
+	// Mount the Connect handler. Since Connect uses HTTP/2 streaming, this works best with direct http.Server,
+	// but Gin can wrap it for H1/H2C. 
+	// Connect handles its own CORS if configured, or inherits parent.
+	r.Any(path+"*any", gin.WrapH(handler))
 
 	// Swagger UI
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))

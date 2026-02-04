@@ -1,6 +1,6 @@
 # Binaries
-gateway
-zserver
+/gateway
+/zserver
 *.exe
 *.exe~
 *.dll
