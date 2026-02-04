@@ -20,21 +20,21 @@ type App struct {
 }
 
 // NewApp creates a new App application struct
-func NewApp() *App {
+func NewApp() (*App, error) {
 	cm, err := NewConfigManager()
 	if err != nil {
-		fmt.Printf("Error initializing config: %v\n", err)
+		return nil, fmt.Errorf("config init error: %w", err)
 	}
 	
 	db, err := NewDBManager()
 	if err != nil {
-		fmt.Printf("Error initializing db: %v\n", err)
+		return nil, fmt.Errorf("database init error: %w", err)
 	}
 
 	return &App{
 		config: cm,
 		db:     db,
-	}
+	}, nil
 }
 
 // startup is called when the app starts. The context is saved
