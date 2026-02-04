@@ -40,6 +40,20 @@ func (h *HybridProvider) Fetch(db string, ids []string) ([]*z3950.MARCRecord, er
 	return h.proxy.Fetch(db, ids)
 }
 
+func (h *HybridProvider) CreateRecord(db string, record *z3950.MARCRecord) (string, error) {
+	if h.isLocalDB(db) {
+		return h.local.CreateRecord(db, record)
+	}
+	return "", fmt.Errorf("cannot create record in remote database")
+}
+
+func (h *HybridProvider) UpdateRecord(db string, id string, record *z3950.MARCRecord) error {
+	if h.isLocalDB(db) {
+		return h.local.UpdateRecord(db, id, record)
+	}
+	return fmt.Errorf("cannot update record in remote database")
+}
+
 func (h *HybridProvider) Scan(db, field, startTerm string, opts z3950.ScanOptions) ([]ScanResult, error) {
 	if h.isLocalDB(db) {
 		return h.local.Scan(db, field, startTerm, opts)

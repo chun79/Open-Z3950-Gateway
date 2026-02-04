@@ -429,18 +429,30 @@ func (s *Server) handleScan(conn net.Conn, connID string, req *ber.Packet) {
 	var walk func(*ber.Packet)
 	walk = func(p *ber.Packet) {
 		if p.Tag == 45 { // Term
-			if val, ok := p.Value.([]byte); ok { term = string(val) } else { term = string(p.Data.Bytes()) }
+			if val, ok := p.Value.([]byte); ok {
+				term = string(val)
+			} else {
+				term = string(p.Data.Bytes())
+			}
 		}
 		if p.Tag == 31 { // NumberOfTermsRequested
-			if v, ok := p.Value.(int64); ok { opts.Count = int(v) }
+			if v, ok := p.Value.(int64); ok {
+				opts.Count = int(v)
+			}
 		}
 		if p.Tag == 32 { // StepSize
-			if v, ok := p.Value.(int64); ok { opts.StepSize = int(v) }
+			if v, ok := p.Value.(int64); ok {
+				opts.StepSize = int(v)
+			}
 		}
 		if p.Tag == 33 { // PositionOfTerm
-			if v, ok := p.Value.(int64); ok { opts.PositionOfTerm = int(v) }
+			if v, ok := p.Value.(int64); ok {
+				opts.PositionOfTerm = int(v)
+			}
 		}
-		for _, c := range p.Children { walk(c) }
+		for _, c := range p.Children {
+			walk(c)
+		}
 	}
 	walk(req)
 
@@ -563,15 +575,15 @@ type LoginRequest struct {
 
 // LoginResponse auth token
 type LoginResponse struct {
-	Status string `json:"status"`
-	Token  string `json:"token"`
+	Status string            `json:"status"`
+	Token  string            `json:"token"`
 	User   map[string]string `json:"user"`
 }
 
 func setupRouter(dbProvider provider.Provider) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Recovery())
-	
+
 	// --- 0. OpenTelemetry Middleware ---
 	r.Use(otelgin.Middleware("gateway"))
 
@@ -588,12 +600,6 @@ func setupRouter(dbProvider provider.Provider) *gin.Engine {
 	notifier := notify.NewLogNotifier()
 
 	// --- 2. Health Check ---
-	// @Summary Health Check
-	// @Description Checks if the server is running
-	// @Tags System
-	// @Produce json
-	// @Success 200 {object} map[string]interface{}
-	// @Router /health [get]
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "UP", "time": time.Now()})
 	})
@@ -606,8 +612,7 @@ func setupRouter(dbProvider provider.Provider) *gin.Engine {
 	// --- 4. SIP2 Client Setup ---
 	sipHost := os.Getenv("SIP2_HOST")
 	sipPort := os.Getenv("SIP2_PORT")
-	
-	// Start Mock Server if requested or if no host provided
+
 	if os.Getenv("SIP2_MOCK") == "true" || sipHost == "" {
 		slog.Info("Starting Mock SIP2 Server on :6001")
 		mock := sip2.NewMockServer(6001)
@@ -627,7 +632,7 @@ func setupRouter(dbProvider provider.Provider) *gin.Engine {
 	ils := r.Group("/api/ils")
 	ils.POST("/login", func(c *gin.Context) {
 		if sipClient == nil {
-			c.JSON(503, gin.H{"error": "ILS integration not configured"})
+			c.JSON(533, gin.H{"error": "ILS integration not configured"})
 			return
 		}
 		var req struct {
@@ -656,11 +661,11 @@ func setupRouter(dbProvider provider.Provider) *gin.Engine {
 
 	ils.GET("/profile", func(c *gin.Context) {
 		if sipClient == nil {
-			c.JSON(503, gin.H{"error": "ILS integration not configured"})
+			c.JSON(533, gin.H{"error": "ILS integration not configured"})
 			return
 		}
-		barcode := c.Query("barcode") // In real app, get from JWT context
-		
+		barcode := c.Query("barcode")
+
 		if err := sipClient.Connect(); err != nil {
 			c.JSON(500, gin.H{"error": "Failed to connect to ILS"})
 			return
@@ -676,20 +681,7 @@ func setupRouter(dbProvider provider.Provider) *gin.Engine {
 		c.JSON(200, gin.H{"status": "success", "data": info})
 	})
 
-	// Swagger UI
-	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
-
 	// Public Auth Routes
-	
-	// @Summary Login
-	// @Description Authenticate user and get a JWT token
-	// @Tags Auth
-	// @Accept json
-	// @Produce json
-	// @Param credentials body LoginRequest true "Login Credentials"
-	// @Success 200 {object} LoginResponse
-	// @Failure 401 {object} APIError
-	// @Router /api/auth/login [post]
 	r.POST("/api/auth/login", func(c *gin.Context) {
 		var creds LoginRequest
 		if err := c.BindJSON(&creds); err != nil {
@@ -721,14 +713,6 @@ func setupRouter(dbProvider provider.Provider) *gin.Engine {
 		})
 	})
 
-	// @Summary Register
-	// @Description Create a new user account
-	// @Tags Auth
-	// @Accept json
-	// @Produce json
-	// @Param credentials body LoginRequest true "User Credentials"
-	// @Success 201 {object} map[string]string
-	// @Router /api/auth/register [post]
 	r.POST("/api/auth/register", func(c *gin.Context) {
 		var req LoginRequest
 		if err := c.BindJSON(&req); err != nil {
@@ -761,17 +745,53 @@ func setupRouter(dbProvider provider.Provider) *gin.Engine {
 	api := r.Group("/api")
 	api.Use(authMiddleware())
 
-	// @Summary Search Books
-	// @Description Perform a Z39.50 search
-	// @Tags Search
-	// @Security ApiKeyAuth
-	// @Security BearerAuth
-	// @Produce json
-	// @Param query query string true "Search Term"
-	// @Param db query string false "Database Name"
-	// @Param attr1 query int false "Attribute Type (1=Use)"
-	// @Success 200 {object} map[string]interface{}
-	// @Router /api/search [get]
+	// --- Cataloging APIs (LSP) ---
+	api.POST("/books", func(c *gin.Context) {
+		var rec z3950.MARCRecord
+		if err := c.BindJSON(&rec); err != nil {
+			c.JSON(400, gin.H{"error": "Invalid MARC record JSON"})
+			return
+		}
+		// Default target for new records
+		db := c.DefaultQuery("db", "Default")
+		id, err := dbProvider.CreateRecord(db, &rec)
+		if err != nil {
+			c.JSON(500, gin.H{"error": "Failed to create record: " + err.Error()})
+			return
+		}
+		c.JSON(201, gin.H{"status": "success", "id": id})
+	})
+
+	api.PUT("/books/:db/:id", func(c *gin.Context) {
+		db := c.Param("db")
+		id := c.Param("id")
+		var req struct {
+			Fields []z3950.MARCField `json:"fields"`
+		}
+		if err := c.BindJSON(&req); err != nil {
+			c.JSON(400, gin.H{"error": "Invalid fields JSON"})
+			return
+		}
+
+		// 1. Fetch existing
+		recs, err := dbProvider.Fetch(db, []string{id})
+		if err != nil || len(recs) == 0 {
+			c.JSON(404, gin.H{"error": "Record not found"})
+			return
+		}
+
+		// 2. Update fields
+		record := recs[0]
+		record.UpdateFields(req.Fields)
+
+		// 3. Save back
+		if err := dbProvider.UpdateRecord(db, id, record); err != nil {
+			c.JSON(500, gin.H{"error": "Update failed: " + err.Error()})
+			return
+		}
+		c.JSON(200, gin.H{"status": "success"})
+	})
+
 	api.GET("/search", func(c *gin.Context) {
 		start := time.Now()
 		db := c.DefaultQuery("db", "LCDB")
@@ -893,17 +913,6 @@ func setupRouter(dbProvider provider.Provider) *gin.Engine {
 		})
 	})
 
-	// @Summary Federated Search
-	// @Description Search multiple targets concurrently and return aggregated records
-	// @Tags Search
-	// @Security ApiKeyAuth
-	// @Security BearerAuth
-	// @Produce json
-	// @Param query query string true "Search Term"
-	// @Param targets query string true "Comma-separated list of target names (e.g. 'LCDB,Oxford')"
-	// @Param limit query int false "Max records per target"
-	// @Success 200 {object} map[string]interface{}
-	// @Router /api/federated-search [get]
 	api.GET("/federated-search", func(c *gin.Context) {
 		start := time.Now()
 		targetsStr := c.Query("targets")
@@ -913,7 +922,7 @@ func setupRouter(dbProvider provider.Provider) *gin.Engine {
 			return
 		}
 
-		limit := 5 // Default 5 records per target to keep it fast
+		limit := 5
 		if l := c.Query("limit"); l != "" {
 			if v, err := strconv.Atoi(l); err == nil && v > 0 {
 				limit = v
@@ -921,26 +930,24 @@ func setupRouter(dbProvider provider.Provider) *gin.Engine {
 		}
 
 		targetList := strings.Split(targetsStr, ",")
-		
-		// Prepare concurrency
+
 		var wg sync.WaitGroup
 		resultsChan := make(chan map[string]interface{}, len(targetList)*limit)
-		
-		// Construct the Z39.50 query structure once (simple query)
-		// For now federated search supports simple Term query on Attribute=Any (or Title)
+
 		zQuery := z3950.StructuredQuery{
 			Root: z3950.QueryClause{Attribute: z3950.UseAttributeAny, Term: queryTerm},
 		}
 
 		for _, dbName := range targetList {
 			dbName = strings.TrimSpace(dbName)
-			if dbName == "" { continue }
+			if dbName == "" {
+				continue
+			}
 
 			wg.Add(1)
 			go func(target string) {
 				defer wg.Done()
-				
-				// 1. Search
+
 				ids, err := dbProvider.Search(target, zQuery)
 				if err != nil {
 					slog.Warn("federated search error", "target", target, "error", err)
@@ -951,70 +958,58 @@ func setupRouter(dbProvider provider.Provider) *gin.Engine {
 					return
 				}
 
-				// 2. Limit fetch
 				fetchCount := limit
-				if len(ids) < fetchCount { fetchCount = len(ids) }
+				if len(ids) < fetchCount {
+					fetchCount = len(ids)
+				}
 				idsToFetch := ids[:fetchCount]
 
-				// 3. Fetch Records
 				records, err := dbProvider.Fetch(target, idsToFetch)
 				if err != nil {
 					slog.Warn("federated fetch error", "target", target, "error", err)
 					return
 				}
 
-				// 4. Convert to JSON
 				for _, rec := range records {
 					res := map[string]interface{}{
-						"source_target": target, // Tag the source
+						"source_target": target,
 						"record_id":     rec.RecordID,
 						"title":         rec.GetTitle(nil),
 						"author":        rec.GetAuthor(nil),
 						"isbn":          rec.GetISBN(nil),
 						"publisher":     rec.GetPublisher(nil),
-						"year":          rec.GetPubYear(nil), // Simplified field
+						"year":          rec.GetPubYear(nil),
 					}
 					resultsChan <- res
 				}
 			}(dbName)
 		}
 
-		// Wait and close
 		go func() {
 			wg.Wait()
 			close(resultsChan)
 		}()
 
-		// Collect results
 		aggregated := make([]map[string]interface{}, 0)
 		for res := range resultsChan {
 			aggregated = append(aggregated, res)
 		}
 
 		elapsed := time.Since(start)
-		slog.Info("federated search completed", 
-			"targets", len(targetList), 
+		slog.Info("federated search completed",
+			"targets", len(targetList),
 			"total_found", len(aggregated),
 			"latency_ms", elapsed.Milliseconds(),
 		)
 
 		c.JSON(200, gin.H{
-			"status": "success",
-			"count":  len(aggregated),
-			"data":   aggregated,
+			"status":  "success",
+			"count":   len(aggregated),
+			"data":    aggregated,
 			"time_ms": elapsed.Milliseconds(),
 		})
 	})
 
-	// @Summary Get Book Details
-	// @Description Fetch full MARC record by ID
-	// @Tags Search
-	// @Security ApiKeyAuth
-	// @Produce json
-	// @Param db path string true "Database Name"
-	// @Param id path string true "Record ID"
-	// @Success 200 {object} map[string]interface{}
-	// @Router /api/books/{db}/{id} [get]
 	api.GET("/books/:db/:id", func(c *gin.Context) {
 		db := c.Param("db")
 		id := c.Param("id")
@@ -1329,7 +1324,6 @@ func main() {
 
 	dbProvider = provider.NewHybridProvider(dbProvider)
 
-	// --- 3. Start Z39.50 Server ---
 	zPort := os.Getenv("ZSERVER_PORT")
 	if zPort == "" {
 		zPort = "2100"
@@ -1355,7 +1349,6 @@ func main() {
 		}()
 	}
 
-	// --- 4. Start HTTP Gateway with Graceful Shutdown ---
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8899"
@@ -1374,8 +1367,6 @@ func main() {
 		}
 	}()
 
-	// Wait for interrupt signal to gracefully shutdown the server with
-	// a timeout of 5 seconds.
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit

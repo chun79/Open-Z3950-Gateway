@@ -214,6 +214,32 @@ func (m *MemoryProvider) UpdateILLRequestStatus(id int64, status string) error {
 	return fmt.Errorf("request with id %d not found", id)
 }
 
+func (m *MemoryProvider) CreateRecord(db string, record *z3950.MARCRecord) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	id := fmt.Sprintf("%d", len(m.books)+1)
+	m.books = append(m.books, SearchResult{
+		ID: id, Title: record.Title, Author: record.Author, ISBN: record.ISBN,
+		Publisher: record.Publisher, PubYear: record.GetPubYear(nil), Subject: record.Subject,
+	})
+	return id, nil
+}
+
+func (m *MemoryProvider) UpdateRecord(db string, id string, record *z3950.MARCRecord) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i, b := range m.books {
+		if b.ID == id {
+			m.books[i] = SearchResult{
+				ID: id, Title: record.Title, Author: record.Author, ISBN: record.ISBN,
+				Publisher: record.Publisher, PubYear: record.GetPubYear(nil), Subject: record.Subject,
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("record not found")
+}
+
 func (m *MemoryProvider) CreateUser(user *User) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

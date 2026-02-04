@@ -455,6 +455,69 @@ func (p *SQLiteProvider) UpdateILLRequestStatus(id int64, status string) error {
 	return err
 }
 
+// --- Cataloging Implementation ---
+
+func (p *SQLiteProvider) CreateRecord(db string, record *z3950.MARCRecord) (string, error) {
+	// 1. Build MARC binary from fields if not present, or use raw
+	// For simplicity, let's assume we build it from the record fields to keep it fresh
+	marcData := z3950.BuildMARC(p.profile, "", 
+		record.GetTitle(p.profile), 
+		record.GetAuthor(p.profile), 
+		record.GetISBN(p.profile), 
+		record.GetPublisher(p.profile), 
+		record.GetPubYear(p.profile), 
+		record.GetISSN(p.profile), 
+		record.GetSubject(p.profile))
+
+	// 2. Insert into DB
+	res, err := p.db.Exec(`
+		INSERT INTO bibliography (title, author, isbn, publisher, pub_year, issn, subjects, raw_record, raw_record_format)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		record.GetTitle(p.profile),
+		record.GetAuthor(p.profile),
+		record.GetISBN(p.profile),
+		record.GetPublisher(p.profile),
+		record.GetPubYear(p.profile),
+		record.GetISSN(p.profile),
+		record.GetSubject(p.profile),
+		string(marcData),
+		"MARC21", // Or p.profile.Name
+	)
+	if err != nil {
+		return "", err
+	}
+
+	lastID, _ := res.LastInsertId()
+	return fmt.Sprintf("%d", lastID), nil
+}
+
+func (p *SQLiteProvider) UpdateRecord(db string, id string, record *z3950.MARCRecord) error {
+	marcData := z3950.BuildMARC(p.profile, id, 
+		record.GetTitle(p.profile), 
+		record.GetAuthor(p.profile), 
+		record.GetISBN(p.profile), 
+		record.GetPublisher(p.profile), 
+		record.GetPubYear(p.profile), 
+		record.GetISSN(p.profile), 
+		record.GetSubject(p.profile))
+
+	_, err := p.db.Exec(`
+		UPDATE bibliography SET 
+			title = ?, author = ?, isbn = ?, publisher = ?, pub_year = ?, issn = ?, subjects = ?, raw_record = ?
+		WHERE CAST(id AS TEXT) = ?`,
+		record.GetTitle(p.profile),
+		record.GetAuthor(p.profile),
+		record.GetISBN(p.profile),
+		record.GetPublisher(p.profile),
+		record.GetPubYear(p.profile),
+		record.GetISSN(p.profile),
+		record.GetSubject(p.profile),
+		string(marcData),
+		id,
+	)
+	return err
+}
+
 func (p *SQLiteProvider) CreateUser(user *User) error {
 	_, err := p.db.Exec("INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)", user.Username, user.PasswordHash, user.Role)
 	return err

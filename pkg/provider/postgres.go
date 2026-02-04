@@ -439,6 +439,39 @@ func (p *PostgresProvider) UpdateILLRequestStatus(id int64, status string) error
 	return err
 }
 
+func (p *PostgresProvider) CreateRecord(db string, record *z3950.MARCRecord) (string, error) {
+	table := p.getTable(db)
+	marcData := z3950.BuildMARC(p.profile, "", record.GetTitle(p.profile), record.GetAuthor(p.profile), record.GetISBN(p.profile), record.GetPublisher(p.profile), record.GetPubYear(p.profile), record.GetISSN(p.profile), record.GetSubject(p.profile))
+
+	var lastID int64
+	err := p.db.QueryRow(fmt.Sprintf(`
+		INSERT INTO %s (title, author, isbn, publisher, pub_year, issn, subjects, raw_record, raw_record_format)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`, table),
+		record.GetTitle(p.profile), record.GetAuthor(p.profile), record.GetISBN(p.profile),
+		record.GetPublisher(p.profile), record.GetPubYear(p.profile), record.GetISSN(p.profile),
+		record.GetSubject(p.profile), string(marcData), "MARC21",
+	).Scan(&lastID)
+
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%d", lastID), nil
+}
+
+func (p *PostgresProvider) UpdateRecord(db string, id string, record *z3950.MARCRecord) error {
+	table := p.getTable(db)
+	marcData := z3950.BuildMARC(p.profile, id, record.GetTitle(p.profile), record.GetAuthor(p.profile), record.GetISBN(p.profile), record.GetPublisher(p.profile), record.GetPubYear(p.profile), record.GetISSN(p.profile), record.GetSubject(p.profile))
+
+	_, err := p.db.Exec(fmt.Sprintf(`
+		UPDATE %s SET title = $1, author = $2, isbn = $3, publisher = $4, pub_year = $5, issn = $6, subjects = $7, raw_record = $8
+		WHERE CAST(id AS VARCHAR) = $9`, table),
+		record.GetTitle(p.profile), record.GetAuthor(p.profile), record.GetISBN(p.profile),
+		record.GetPublisher(p.profile), record.GetPubYear(p.profile), record.GetISSN(p.profile),
+		record.GetSubject(p.profile), string(marcData), id,
+	)
+	return err
+}
+
 func (p *PostgresProvider) CreateUser(user *User) error {
 	_, err := p.db.Exec("INSERT INTO users (username, password_hash, role) VALUES ($1, $2, $3)", user.Username, user.PasswordHash, user.Role)
 	return err

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useI18n } from '../context/I18nContext'
 import { Book } from '../types'
@@ -16,24 +16,20 @@ export default function BookDetail() {
   const [comments, setComments] = useState('')
   const [requestStatus, setRequestStatus] = useState<{msg: string, type: 'success' | 'error'} | null>(null)
 
+  const isLocal = db === 'Default'
+
   useEffect(() => {
     if (!db || !id) return
-    
     const fetchBook = async () => {
       setLoading(true)
       try {
-        const safeId = encodeURIComponent(id)
-        const response = await fetch(`/api/books/${db}/${safeId}`, {
+        const response = await fetch(`/api/books/${db}/${encodeURIComponent(id)}`, {
           headers: { 'Authorization': `Bearer ${token}` }
         })
         if (!response.ok) throw new Error("Failed to load book details")
         const data = await response.json()
         setBook(data.data)
-      } catch (err: any) {
-        setError(err.message)
-      } finally {
-        setLoading(false)
-      }
+      } catch (err: any) { setError(err.message) } finally { setLoading(false) }
     }
     fetchBook()
   }, [db, id, token])
@@ -43,39 +39,12 @@ export default function BookDetail() {
     try {
       const response = await fetch('/api/ill-requests', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          title: book.title,
-          author: book.author,
-          isbn: book.isbn,
-          target_db: db || 'unknown',
-          record_id: book.record_id || id || 'unknown',
-          comments: comments
-        })
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ title: book.title, author: book.author, isbn: book.isbn, target_db: db, record_id: book.record_id || id, comments })
       })
-
-      if (!response.ok) {
-        const errData = await response.json()
-        throw new Error(errData.error || 'Request failed')
-      }
-
-      setRequestStatus({ 
-        msg: t('detail.request_success').replace('{title}', book.title), 
-        type: 'success' 
-      })
-    } catch (err: any) {
-      setRequestStatus({ 
-        msg: t('detail.request_fail').replace('{error}', err.message), 
-        type: 'error' 
-      })
-    }
-  }
-
-  const cleanISBN = (isbn: string) => {
-    return isbn?.replace(/[^0-9X]/gi, '') || ''
+      if (!response.ok) throw new Error('Request failed')
+      setRequestStatus({ msg: t('detail.request_success').replace('{title}', book.title), type: 'success' })
+    } catch (err: any) { setRequestStatus({ msg: t('detail.request_fail').replace('{error}', err.message), type: 'error' }) }
   }
 
   if (loading) return <article aria-busy="true"></article>
@@ -84,96 +53,41 @@ export default function BookDetail() {
 
   return (
     <div className="container">
-      <button className="outline secondary" onClick={() => navigate(-1)} style={{marginBottom: '20px'}}>
-        ← {t('detail.back')}
-      </button>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+        <button className="outline secondary" onClick={() => navigate(-1)} style={{ marginBottom: 0 }}>← {t('detail.back')}</button>
+        {isLocal && (
+          <Link to={`/edit/${db}/${encodeURIComponent(id || '')}`} role="button" className="contrast">
+            ✍️ Edit Metadata
+          </Link>
+        )}
+      </div>
       
       <article>
         <div className="grid">
           <div style={{ flex: '0 0 200px' }}>
-             <img 
-                src={book.isbn 
-                  ? `https://covers.openlibrary.org/b/isbn/${cleanISBN(book.isbn)}-L.jpg?default=https://placehold.co/200x300/e0e0e0/808080?text=No+Cover`
-                  : 'https://placehold.co/200x300/e0e0e0/808080?text=No+ISBN'
-                }
-                alt="Cover"
-                style={{ width: '100%', borderRadius: '8px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}
-              />
+             <img src={book.isbn ? `https://covers.openlibrary.org/b/isbn/${book.isbn.replace(/[^0-9X]/gi, '')}-L.jpg?default=https://placehold.co/200x300/e0e0e0/808080?text=No+Cover` : 'https://placehold.co/200x300/e0e0e0/808080?text=No+ISBN'} style={{ width: '100%', borderRadius: '8px' }} />
           </div>
           <div>
             <hgroup>
               <h2>{book.title}</h2>
               <h3>{book.author}</h3>
             </hgroup>
-            
-            {requestStatus && (
-              <div style={{ 
-                padding: '10px', 
-                marginBottom: '15px',
-                borderRadius: '4px',
-                backgroundColor: requestStatus.type === 'success' ? '#d4edda' : '#f8d7da',
-                color: requestStatus.type === 'success' ? '#155724' : '#721c24'
-              }}>
-                {requestStatus.msg}
-              </div>
-            )}
-
             <div className="grid">
-              <div>
-                <small>{t('detail.publisher')}</small>
-                <p><strong>{book.publisher}</strong></p>
-              </div>
-              <div>
-                <small>{t('detail.edition')}</small>
-                <p><strong>{book.edition || '-'}</strong></p>
-              </div>
-              <div>
-                <small>{t('detail.isbn')}</small>
-                <p><strong>{book.isbn}</strong></p>
-              </div>
+              <div><small>{t('detail.publisher')}</small><p><strong>{book.publisher}</strong></p></div>
+              <div><small>{t('detail.isbn')}</small><p><strong>{book.isbn}</strong></p></div>
+              <div><small>Source</small><p><mark>{db}</mark></p></div>
             </div>
-
-            {book.summary && (
-              <details open>
-                <summary>{t('detail.summary')}</summary>
-                <p>{book.summary}</p>
-              </details>
-            )}
-
-            {book.toc && (
-              <details>
-                <summary>{t('detail.toc')}</summary>
-                <pre style={{whiteSpace: 'pre-wrap', fontFamily: 'sans-serif'}}>{book.toc}</pre>
-              </details>
-            )}
-
-            {book.physical && (
-              <p><small>{t('detail.physical')}: {book.physical}</small></p>
-            )}
-            
-            {book.series && (
-              <p><small>{t('detail.series')}: {book.series}</small></p>
-            )}
-
+            {book.summary && <details open><summary>{t('detail.summary')}</summary><p>{book.summary}</p></details>}
             <hr />
-            
-            <label htmlFor="comments">
-              {t('detail.comments')}
-              <textarea 
-                id="comments" 
-                value={comments} 
-                onChange={(e) => setComments(e.target.value)} 
-                placeholder="e.g. Need by Friday, Chapter 3 only..."
-                style={{ resize: 'vertical', minHeight: '80px' }}
-              />
-            </label>
-
-            <footer>
-              <div role="group">
+            {!isLocal && (
+              <>
+                <label htmlFor="comments">{t('detail.comments')}
+                  <textarea id="comments" value={comments} onChange={(e) => setComments(e.target.value)} placeholder="e.g. Need by Friday..." style={{ resize: 'vertical', minHeight: '80px' }} />
+                </label>
                 <button onClick={handleILLRequest}>{t('detail.request_btn')}</button>
-                <button className="secondary outline">Add to List</button>
-              </div>
-            </footer>
+              </>
+            )}
+            {isLocal && <p>✅ This record is in your local collection.</p>}
           </div>
         </div>
       </article>

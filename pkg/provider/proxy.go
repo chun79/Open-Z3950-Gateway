@@ -235,6 +235,14 @@ func (p *ProxyProvider) Scan(db, field, startTerm string, opts z3950.ScanOptions
 	return results, nil
 }
 
+func (p *ProxyProvider) CreateRecord(db string, record *z3950.MARCRecord) (string, error) {
+	return "", fmt.Errorf("proxy provider is read-only")
+}
+
+func (p *ProxyProvider) UpdateRecord(db string, id string, record *z3950.MARCRecord) error {
+	return fmt.Errorf("proxy provider is read-only")
+}
+
 // Stub implementations for unsupported methods
 func (p *ProxyProvider) CreateILLRequest(req ILLRequest) error {
 	return fmt.Errorf("proxy provider does not support creating ILL requests locally")

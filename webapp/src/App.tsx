@@ -7,6 +7,7 @@ import Login from './pages/Login'
 import Settings from './pages/Settings'
 import AdminDashboard from './pages/AdminDashboard'
 import MyLibrary from './pages/MyLibrary'
+import MARCEditor from './pages/MARCEditor'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { I18nProvider, useI18n } from './context/I18nContext'
 import { ThemeProvider, useTheme } from './context/ThemeContext'
@@ -118,6 +119,7 @@ function App() {
                   <Route path="/browse" element={<ProtectedRoute><Browse /></ProtectedRoute>} />
                   <Route path="/requests" element={<ProtectedRoute><Requests /></ProtectedRoute>} />
                   <Route path="/my-library" element={<ProtectedRoute><MyLibrary /></ProtectedRoute>} />
+                  <Route path="/edit/:db/:id" element={<ProtectedRoute><MARCEditor /></ProtectedRoute>} />
                   <Route path="/settings" element={<AdminRoute><Settings /></AdminRoute>} />
                   <Route path="/admin" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
                 </Routes>

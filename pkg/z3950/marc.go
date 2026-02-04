@@ -263,3 +263,9 @@ func (r *MARCRecord) GetSubject(p *MARCProfile) string {
 	if p == nil { p = &ProfileMARC21 }
 	return r.GetFieldByTag(p.SubjectTag)
 }
+
+// UpdateFields updates the internal Fields slice and repopulates friendly fields
+func (r *MARCRecord) UpdateFields(newFields []MARCField) {
+	r.Fields = newFields
+	r.PopulateFriendlyFields()
+}
