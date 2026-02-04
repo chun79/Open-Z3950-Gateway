@@ -26,6 +26,7 @@ import (
 	"github.com/yourusername/open-z3950-gateway/pkg/provider"
 	"github.com/yourusername/open-z3950-gateway/pkg/sip2"
 	"github.com/yourusername/open-z3950-gateway/pkg/telemetry"
+	"github.com/yourusername/open-z3950-gateway/pkg/ai"
 	"github.com/yourusername/open-z3950-gateway/pkg/ui"
 	"github.com/yourusername/open-z3950-gateway/pkg/z3950"
 
@@ -848,6 +849,31 @@ func setupRouter(dbProvider provider.Provider) *gin.Engine {
 			return
 		}
 		c.JSON(200, gin.H{"status": "success"})
+	})
+
+	api.GET("/books/:db/:id/ai-insight", func(c *gin.Context) {
+		db := c.Param("db")
+		id := c.Param("id")
+
+		recs, err := dbProvider.Fetch(db, []string{id})
+		if err != nil || len(recs) == 0 {
+			c.JSON(404, gin.H{"error": "Record not found"})
+			return
+		}
+
+		librarian, err := ai.NewLibrarian(c.Request.Context())
+		if err != nil {
+			c.JSON(503, gin.H{"error": "AI Service not available: " + err.Error()})
+			return
+		}
+
+		insight, err := librarian.GetInsight(c.Request.Context(), recs[0])
+		if err != nil {
+			c.JSON(500, gin.H{"error": "AI Analysis failed: " + err.Error()})
+			return
+		}
+
+		c.JSON(200, gin.H{"status": "success", "insight": insight})
 	})
 
 	api.GET("/search", func(c *gin.Context) {

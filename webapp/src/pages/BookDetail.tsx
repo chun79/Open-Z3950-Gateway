@@ -15,6 +15,10 @@ export default function BookDetail() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   
+  // AI State
+  const [insight, setInsight] = useState<string | null>(null)
+  const [generatingAI, setGeneratingAI] = useState(false)
+
   // Item Management State
   const [showAddItem, setShowAddItem] = useState(false)
   const [newBarcode, setNewBarcode] = useState('')
@@ -39,30 +43,39 @@ export default function BookDetail() {
     fetchBook()
   }, [db, id, token])
 
+  const generateAIInsight = async () => {
+    setGeneratingAI(true)
+    try {
+      const res = await fetch(`/api/books/${db}/${encodeURIComponent(id || '')}/ai-insight`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setInsight(data.insight)
+      } else {
+        throw new Error(data.error || "AI Generation failed")
+      }
+    } catch (err: any) {
+      toast.error(err.message)
+    } finally {
+      setGeneratingAI(false)
+    }
+  }
+
   const handleAddItem = async (e: React.FormEvent) => {
     e.preventDefault()
     try {
       const res = await fetch('/api/items', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({
-          bib_id: id,
-          barcode: newBarcode,
-          location: newLocation,
-          call_number: book?.record_id // Simplified
-        })
+        body: JSON.stringify({ bib_id: id, barcode: newBarcode, location: newLocation, call_number: book?.record_id })
       })
-      if (!res.ok) {
-        const data = await res.json()
-        throw new Error(data.error || "Failed to add item")
-      }
-      toast.success("Item added successfully!")
+      if (!res.ok) throw new Error("Failed to add item")
+      toast.success("Item added!")
       setNewBarcode('')
       setShowAddItem(false)
-      fetchBook() // Refresh list
-    } catch (err: any) {
-      toast.error(err.message)
-    }
+      fetchBook()
+    } catch (err: any) { toast.error(err.message) }
   }
 
   if (loading) return <article aria-busy="true"></article>
@@ -73,11 +86,16 @@ export default function BookDetail() {
     <div className="container">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
         <button className="outline secondary" onClick={() => navigate(-1)} style={{ marginBottom: 0 }}>← {t('detail.back')}</button>
-        {isLocal && (
-          <Link to={`/edit/${db}/${encodeURIComponent(id || '')}`} role="button" className="contrast">
-            ✍️ Edit Metadata
-          </Link>
-        )}
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <button className="contrast outline" onClick={generateAIInsight} disabled={generatingAI} style={{ marginBottom: 0 }}>
+            {generatingAI ? '✨ Analyzing...' : '✨ AI Insight'}
+          </button>
+          {isLocal && (
+            <Link to={`/edit/${db}/${encodeURIComponent(id || '')}`} role="button" className="contrast">
+              ✍️ Edit
+            </Link>
+          )}
+        </div>
       </div>
       
       <article>
@@ -90,63 +108,53 @@ export default function BookDetail() {
               <h2>{book.title}</h2>
               <h3>{book.author}</h3>
             </hgroup>
+
+            {/* AI Insight Section */}
+            {insight && (
+              <div style={{ padding: '20px', background: 'linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)', borderRadius: '12px', marginBottom: '20px', borderLeft: '5px solid #1976d2' }}>
+                <strong style={{ color: '#1976d2' }}>✨ AI Librarian Insight</strong>
+                <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit', margin: '10px 0 0 0', fontSize: '0.95em', color: '#333' }}>
+                  {insight}
+                </pre>
+              </div>
+            )}
+
             <div className="grid">
-              <div><small>{t('detail.publisher')}</small><p><strong>{book.publisher}</strong></p></div>
-              <div><small>{t('detail.isbn')}</small><p><strong>{book.isbn}</strong></p></div>
+              <div><small>Publisher</small><p><strong>{book.publisher}</strong></p></div>
+              <div><small>ISBN</small><p><strong>{book.isbn}</strong></p></div>
               <div><small>Source</small><p><mark>{db}</mark></p></div>
             </div>
             
-            {book.summary && <details open><summary>{t('detail.summary')}</summary><p>{book.summary}</p></details>}
-            
             <hr />
 
-            {/* Holdings / Items Section */}
             <section>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h4>🏛 Holdings & Availability</h4>
-                {isLocal && (
-                  <button className="outline secondary" onClick={() => setShowAddItem(!showAddItem)} style={{ padding: '2px 10px', fontSize: '0.8em' }}>
-                    {showAddItem ? 'Cancel' : '+ Add Copy'}
-                  </button>
-                )}
+                <h4>🏛 Holdings</h4>
+                {isLocal && <button className="outline secondary" onClick={() => setShowAddItem(!showAddItem)} style={{ padding: '2px 10px', fontSize: '0.8em' }}>{showAddItem ? 'Cancel' : '+ Add'}</button>}
               </div>
 
               {showAddItem && (
                 <form onSubmit={handleAddItem} style={{ padding: '15px', background: '#f0f2f5', borderRadius: '8px', marginBottom: '15px' }}>
                   <div className="grid">
-                    <input type="text" placeholder="Barcode (e.g. 10001)" value={newBarcode} onChange={e => setNewBarcode(e.target.value)} required />
-                    <input type="text" placeholder="Location" value={newLocation} onChange={e => setNewLocation(e.target.value)} />
-                    <button type="submit">Confirm Ingest</button>
+                    <input type="text" placeholder="Barcode" value={newBarcode} onChange={e => setNewBarcode(e.target.value)} required />
+                    <button type="submit">Confirm</button>
                   </div>
                 </form>
               )}
 
               {book.holdings && book.holdings.length > 0 ? (
                 <table className="striped">
-                  <thead>
-                    <tr>
-                      <th>Barcode / Call No.</th>
-                      <th>Location</th>
-                      <th>Status</th>
-                    </tr>
-                  </thead>
                   <tbody>
                     {book.holdings.map((h, i) => (
                       <tr key={i}>
                         <td><code>{h.call_number}</code></td>
                         <td>{h.location}</td>
-                        <td>
-                          <ins style={{ color: h.status === 'Available' ? 'green' : 'orange', textDecoration: 'none', fontWeight: 'bold' }}>
-                            {h.status === 'Available' ? '✅ Available' : '📖 Out'}
-                          </ins>
-                        </td>
+                        <td><ins style={{ color: h.status === 'Available' ? 'green' : 'orange', textDecoration: 'none' }}>{h.status}</ins></td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
-              ) : (
-                <p style={{ color: '#666', fontStyle: 'italic' }}>No physical items found for this record.</p>
-              )}
+              ) : <p style={{ color: '#666', fontStyle: 'italic' }}>No physical items.</p>}
             </section>
           </div>
         </div>
