@@ -1,37 +1,48 @@
 import React, { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
-import { useI18n } from '../context/I18nContext'
-import { SkeletonCard } from '../components/Skeletons'
+import toast from 'react-hot-toast'
 
-type ILLRequest = {
+interface ILLRequest {
   id: number
-  target_db: string
-  record_id: string
   title: string
   author: string
   isbn: string
-  status: 'pending' | 'approved' | 'rejected'
+  target_db: string
+  status: string
   requestor: string
-  comments?: string
-  created_at?: string
+}
+
+interface Stats {
+  total_titles: number
+  total_items: number
+  active_loans: number
+  overdue_loans: number
 }
 
 export default function AdminDashboard() {
-  const { token, user } = useAuth()
-  const { t } = useI18n()
+  const { token } = useAuth()
   const [requests, setRequests] = useState<ILLRequest[]>([])
-  const [loading, setLoading] = useState(false)
-  const [filter, setFilter] = useState<string>('all')
+  const [stats, setStats] = useState<Stats | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [activeTab, setActiveTab] = useState<'requests' | 'stats'>('stats')
 
-  const fetchRequests = async () => {
+  const fetchData = async () => {
     setLoading(true)
     try {
-      const res = await fetch('/api/ill-requests', {
+      // 1. Fetch ILL Requests
+      const resReq = await fetch('/api/ill-requests', {
         headers: { 'Authorization': `Bearer ${token}` }
       })
-      const data = await res.json()
-      if (data.status === 'success') {
-        setRequests(data.data || [])
+      const dataReq = await resReq.json()
+      setRequests(dataReq.data || [])
+
+      // 2. Fetch Stats
+      const resStats = await fetch('/api/admin/stats', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      const dataStats = await resStats.json()
+      if (dataStats.status === 'success') {
+        setStats(dataStats.data)
       }
     } catch (err) {
       console.error(err)
@@ -41,147 +52,132 @@ export default function AdminDashboard() {
   }
 
   useEffect(() => {
-    if (token) fetchRequests()
+    fetchData()
   }, [token])
 
-  const handleStatusUpdate = async (id: number, newStatus: string) => {
-    if (!confirm(`Are you sure you want to mark this request as ${newStatus}?`)) return
-
+  const updateStatus = async (id: number, status: string) => {
     try {
       const res = await fetch(`/api/ill-requests/${id}/status`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ status: newStatus })
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ status })
       })
-      
       if (res.ok) {
-        // Optimistic update
-        setRequests(requests.map(r => r.id === id ? { ...r, status: newStatus as any } : r))
-      } else {
-        alert("Failed to update status")
+        toast.success(`Request marked as ${status}`)
+        fetchData()
       }
     } catch (err) {
-      console.error(err)
-      alert("Network error")
+      toast.error("Failed to update status")
     }
   }
 
-  const filteredRequests = requests.filter(r => {
-    if (filter === 'all') return true
-    return r.status === filter
-  })
-
-  if (!user || user.role !== 'admin') {
-    return (
-      <article className="pico-background-red-200">
-        <h3>⛔ Access Denied</h3>
-        <p>You need administrator privileges to view this page.</p>
-      </article>
-    )
-  }
+  if (loading) return <article aria-busy="true"></article>
 
   return (
-    <>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-        <hgroup style={{ marginBottom: 0 }}>
-          <h2>Admin Dashboard</h2>
-          <p>Manage Inter-Library Loan Requests</p>
-        </hgroup>
-        
-        <div role="group">
-          <button className={filter === 'all' ? '' : 'outline'} onClick={() => setFilter('all')}>All</button>
-          <button className={filter === 'pending' ? '' : 'outline'} onClick={() => setFilter('pending')}>Pending</button>
-          <button className={filter === 'approved' ? '' : 'outline'} onClick={() => setFilter('approved')}>Approved</button>
-        </div>
-      </div>
+    <div className="container">
+      <header style={{ marginBottom: '30px' }}>
+        <h2>🛡 LSP Admin Command Center</h2>
+        <nav>
+          <ul>
+            <li>
+              <button 
+                className={activeTab === 'stats' ? '' : 'outline secondary'} 
+                onClick={() => setActiveTab('stats')}
+                style={{ padding: '5px 20px' }}
+              >
+                Collection Insights
+              </button>
+            </li>
+            <li>
+              <button 
+                className={activeTab === 'requests' ? '' : 'outline secondary'} 
+                onClick={() => setActiveTab('requests')}
+                style={{ padding: '5px 20px' }}
+              >
+                ILL Requests ({requests.filter(r => r.status === 'pending').length})
+              </button>
+            </li>
+          </ul>
+        </nav>
+      </header>
 
-      {loading ? (
-        <SkeletonCard />
-      ) : (
-        <article style={{ padding: 0, overflow: 'hidden' }}>
-          <table className="striped" style={{ marginBottom: 0 }}>
-            <thead style={{ backgroundColor: '#f9f9f9' }}>
-              <tr>
-                <th style={{ padding: '15px' }}>ID</th>
-                <th>Requestor</th>
-                <th>Book Details</th>
-                <th>Status</th>
-                <th style={{ textAlign: 'right', paddingRight: '20px' }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredRequests.length === 0 ? (
+      {activeTab === 'stats' && stats && (
+        <section>
+          <div className="grid">
+            <article style={{ padding: '20px', textAlign: 'center', background: '#f8f9fa' }}>
+              <small style={{ color: '#666', textTransform: 'uppercase' }}>Total Bibliographies</small>
+              <h1 style={{ margin: '10px 0', fontSize: '3em' }}>{stats.total_titles}</h1>
+              <p style={{ fontSize: '0.8em', opacity: 0.7 }}>Unique titles in catalog</p>
+            </article>
+            <article style={{ padding: '20px', textAlign: 'center', background: '#f8f9fa' }}>
+              <small style={{ color: '#666', textTransform: 'uppercase' }}>Total Physical Items</small>
+              <h1 style={{ margin: '10px 0', fontSize: '3em' }}>{stats.total_items}</h1>
+              <p style={{ fontSize: '0.8em', opacity: 0.7 }}>Total barcoded items</p>
+            </article>
+            <article style={{ padding: '20px', textAlign: 'center', background: '#e3f2fd', border: '1px solid #90caf9' }}>
+              <small style={{ color: '#1976d2', textTransform: 'uppercase' }}>Active Loans</small>
+              <h1 style={{ margin: '10px 0', fontSize: '3em', color: '#1976d2' }}>{stats.active_loans}</h1>
+              <p style={{ fontSize: '0.8em', color: '#1976d2' }}>Books currently out</p>
+            </article>
+            <article style={{ padding: '20px', textAlign: 'center', background: '#fff1f0', border: '1px solid #ffa39e' }}>
+              <small style={{ color: '#f5222d', textTransform: 'uppercase' }}>Overdue Items</small>
+              <h1 style={{ margin: '10px 0', fontSize: '3em', color: '#f5222d' }}>{stats.overdue_loans}</h1>
+              <p style={{ fontSize: '0.8em', color: '#f5222d' }}>Requires intervention</p>
+            </article>
+          </div>
+
+          <article style={{ marginTop: '20px' }}>
+            <header>📈 Growth & Circulation Trends</header>
+            <p style={{ color: '#666', fontStyle: 'italic' }}>Historical trend data will be available as circulation volume increases.</p>
+            <div style={{ height: '10px', width: `${(stats.active_loans / stats.total_items) * 100}%`, background: '#1976d2', borderRadius: '5px' }}></div>
+            <small>Collection Utilization: {((stats.active_loans / stats.total_items) * 100).toFixed(1)}%</small>
+          </article>
+        </section>
+      )}
+
+      {activeTab === 'requests' && (
+        <article>
+          <header>Pending Inter-Library Loan Requests</header>
+          {requests.length === 0 ? (
+            <p>No active requests.</p>
+          ) : (
+            <table className="striped">
+              <thead>
                 <tr>
-                  <td colSpan={5} style={{ textAlign: 'center', padding: '30px', color: '#888' }}>
-                    No requests found.
-                  </td>
+                  <th>Title / ISBN</th>
+                  <th>Requestor</th>
+                  <th>Source DB</th>
+                  <th>Status</th>
+                  <th>Actions</th>
                 </tr>
-              ) : (
-                filteredRequests.map(req => (
-                  <tr key={req.id}>
-                    <td style={{ padding: '15px' }}>#{req.id}</td>
+              </thead>
+              <tbody>
+                {requests.map(r => (
+                  <tr key={r.id}>
                     <td>
-                      <strong>{req.requestor}</strong>
-                      {req.created_at && <div style={{ fontSize: '0.7em', color: '#666' }}>{new Date(req.created_at).toLocaleDateString()}</div>}
+                      <strong>{r.title}</strong><br/>
+                      <small>{r.isbn}</small>
+                    </td>
+                    <td>{r.requestor}</td>
+                    <td><mark>{r.target_db}</mark></td>
+                    <td>
+                      <span className={`badge ${r.status}`}>{r.status}</span>
                     </td>
                     <td>
-                      <div><strong>{req.title}</strong></div>
-                      <div style={{ fontSize: '0.85em' }}>{req.author}</div>
-                      <div style={{ fontSize: '0.8em', color: '#666' }}>ISBN: {req.isbn}</div>
-                      <div style={{ fontSize: '0.8em', color: '#666' }}>Source: {req.target_db}</div>
-                    </td>
-                    <td>
-                      <span 
-                        data-tooltip={req.comments || "No comments"}
-                        style={{
-                          padding: '4px 8px',
-                          borderRadius: '4px',
-                          fontSize: '0.85em',
-                          fontWeight: 'bold',
-                          backgroundColor: req.status === 'approved' ? '#d4edda' : req.status === 'rejected' ? '#f8d7da' : '#fff3cd',
-                          color: req.status === 'approved' ? '#155724' : req.status === 'rejected' ? '#721c24' : '#856404'
-                        }}
-                      >
-                        {req.status.toUpperCase()}
-                      </span>
-                    </td>
-                    <td style={{ textAlign: 'right', paddingRight: '20px' }}>
-                      {req.status === 'pending' && (
-                        <div role="group" style={{ display: 'inline-flex', marginBottom: 0 }}>
-                          <button 
-                            onClick={() => handleStatusUpdate(req.id, 'approved')}
-                            style={{ padding: '5px 10px', fontSize: '0.8em', backgroundColor: '#28a745', borderColor: '#28a745' }}
-                          >
-                            ✓ Approve
-                          </button>
-                          <button 
-                            onClick={() => handleStatusUpdate(req.id, 'rejected')}
-                            style={{ padding: '5px 10px', fontSize: '0.8em', backgroundColor: '#dc3545', borderColor: '#dc3545' }}
-                          >
-                            ✕ Reject
-                          </button>
+                      {r.status === 'pending' && (
+                        <div role="group">
+                          <button className="outline" onClick={() => updateStatus(r.id, 'approved')} style={{ padding: '2px 10px', fontSize: '0.8em' }}>Approve</button>
+                          <button className="outline secondary" onClick={() => updateStatus(r.id, 'rejected')} style={{ padding: '2px 10px', fontSize: '0.8em' }}>Reject</button>
                         </div>
-                      )}
-                      {req.status !== 'pending' && (
-                        <button 
-                          className="outline secondary"
-                          onClick={() => handleStatusUpdate(req.id, 'pending')}
-                          style={{ padding: '5px 10px', fontSize: '0.8em', border: 'none' }}
-                        >
-                          Reset
-                        </button>
                       )}
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ))}
+              </tbody>
+            </table>
+          )}
         </article>
       )}
-    </>
+    </div>
   )
 }

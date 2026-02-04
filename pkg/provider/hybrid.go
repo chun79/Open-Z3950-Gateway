@@ -60,6 +60,10 @@ func (h *HybridProvider) GetItemByBarcode(barcode string) (*Item, error) { retur
 func (h *HybridProvider) Checkout(itemBarcode, patronID string) (string, error) { return h.local.Checkout(itemBarcode, patronID) }
 func (h *HybridProvider) Checkin(itemBarcode string) (float64, error) { return h.local.Checkin(itemBarcode) }
 
+func (h *HybridProvider) GetDashboardStats() (map[string]interface{}, error) {
+	return h.local.GetDashboardStats()
+}
+
 func (h *HybridProvider) Scan(db, field, startTerm string, opts z3950.ScanOptions) ([]ScanResult, error) {
 	if h.isLocalDB(db) {
 		return h.local.Scan(db, field, startTerm, opts)

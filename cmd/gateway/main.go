@@ -1280,6 +1280,15 @@ func setupRouter(dbProvider provider.Provider) *gin.Engine {
 		c.JSON(200, gin.H{"status": "success", "data": targets})
 	})
 
+	admin.GET("/stats", func(c *gin.Context) {
+		stats, err := dbProvider.GetDashboardStats()
+		if err != nil {
+			c.JSON(500, gin.H{"error": "Failed to fetch stats"})
+			return
+		}
+		c.JSON(200, gin.H{"status": "success", "data": stats})
+	})
+
 	admin.POST("/targets", func(c *gin.Context) {
 		var t provider.Target
 		if err := c.BindJSON(&t); err != nil {

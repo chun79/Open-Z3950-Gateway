@@ -623,6 +623,32 @@ func (p *SQLiteProvider) Checkin(itemBarcode string) (float64, error) {
 	return fine, tx.Commit()
 }
 
+func (p *SQLiteProvider) GetDashboardStats() (map[string]interface{}, error) {
+	stats := make(map[string]interface{})
+
+	// 1. Total Titles
+	var titles int
+	p.db.QueryRow("SELECT COUNT(*) FROM bibliography").Scan(&titles)
+	stats["total_titles"] = titles
+
+	// 2. Total Items
+	var items int
+	p.db.QueryRow("SELECT COUNT(*) FROM items").Scan(&items)
+	stats["total_items"] = items
+
+	// 3. Active Loans
+	var activeLoans int
+	p.db.QueryRow("SELECT COUNT(*) FROM loans WHERE status = 'active'").Scan(&activeLoans)
+	stats["active_loans"] = activeLoans
+
+	// 4. Overdue
+	var overdue int
+	p.db.QueryRow("SELECT COUNT(*) FROM loans WHERE status = 'active' AND due_date < ?", time.Now()).Scan(&overdue)
+	stats["overdue_loans"] = overdue
+
+	return stats, nil
+}
+
 func (p *SQLiteProvider) CreateUser(user *User) error {
 	_, err := p.db.Exec("INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)", user.Username, user.PasswordHash, user.Role)
 	return err

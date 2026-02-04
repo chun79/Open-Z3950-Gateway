@@ -88,6 +88,10 @@ type Provider interface {
 	// Checkin returns an item. Returns fine amount if overdue.
 	Checkin(itemBarcode string) (float64, error)
 
+	// --- Statistics & Reporting ---
+
+	GetDashboardStats() (map[string]interface{}, error)
+
 	// --- Index Browsing ---
 
 	// Scan browses the index.
