@@ -16,10 +16,15 @@ type QueryRow = {
 type SearchHistoryItem = {
   timestamp: number
   db: string
-  type: 'simple' | 'advanced'
+  type: 'simple' | 'advanced' | 'federated'
   query?: string
   rows?: QueryRow[]
   summary: string
+}
+
+// Extended Book type to include source_target from federated search
+interface EnhancedBook extends Book {
+  source_target?: string
 }
 
 export default function Search() {
@@ -36,6 +41,7 @@ export default function Search() {
   ]
 
   const [isAdvanced, setIsAdvanced] = useState(false)
+  const [isFederated, setIsFederated] = useState(false)
   const [simpleQuery, setSimpleQuery] = useState('')
   
   const [rows, setRows] = useState<QueryRow[]>([
@@ -44,12 +50,13 @@ export default function Search() {
   
   const [targets, setTargets] = useState<string[]>([])
   const [targetDB, setTargetDB] = useState('LCDB')
+  const [selectedTargets, setSelectedTargets] = useState<string[]>([])
   
   // Sort State
   const [sortAttr, setSortAttr] = useState('4') // Default Title
   const [sortOrder, setSortOrder] = useState('asc')
 
-  const [results, setResults] = useState<Book[]>([])
+  const [results, setResults] = useState<EnhancedBook[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [requestStatus, setRequestStatus] = useState<{msg: string, type: 'success' | 'error'} | null>(null)
@@ -89,11 +96,20 @@ export default function Search() {
 
   const loadHistory = (item: SearchHistoryItem) => {
     setTargetDB(item.db)
-    if (item.type === 'advanced' && item.rows) {
+    if (item.type === 'federated') {
+      setIsFederated(true)
+      setIsAdvanced(false)
+      const tNames = item.db.split(',')
+      setSelectedTargets(tNames)
+      setSimpleQuery(item.query || '')
+      doFederatedSearch(tNames, item.query || '')
+    } else if (item.type === 'advanced' && item.rows) {
+      setIsFederated(false)
       setIsAdvanced(true)
       setRows(item.rows)
       doSearch(item.db, item.rows)
     } else if (item.query) {
+      setIsFederated(false)
       setIsAdvanced(false)
       setSimpleQuery(item.query)
       doSearch(item.db, null, item.query)
@@ -112,7 +128,7 @@ export default function Search() {
       .then(data => {
         if (data.status === 'success' && data.data) {
           setTargets(data.data)
-          // Only set default if no query param
+          setSelectedTargets(data.data.slice(0, 2)) // Default select first two for federated
           if (!new URLSearchParams(location.search).get('db') && data.data.length > 0) {
             setTargetDB(data.data[0])
           }
@@ -132,13 +148,11 @@ export default function Search() {
 
     if (term) {
       if (attr && attr !== '1016') {
-        // Switch to Advanced for specific attribute search
         setIsAdvanced(true)
+        setIsFederated(false)
         setRows([{ id: Date.now(), attribute: attr, term: term, operator: 'AND' }])
-        // Trigger search immediately
         doSearch(db || 'LCDB', [{ attribute: attr, term: term, operator: 'AND' }])
       } else {
-        // Simple search
         setIsAdvanced(false)
         setSimpleQuery(term)
         doSearch(db || 'LCDB', null, term)
@@ -155,8 +169,6 @@ export default function Search() {
     try {
       const params = new URLSearchParams()
       params.append('db', db)
-      
-      // Append Sort Params
       params.append('sortAttr', sortAttr)
       params.append('sortOrder', sortOrder)
       
@@ -176,7 +188,7 @@ export default function Search() {
         summary = `[${db}] ${simpleTerm}`
       } else {
         setLoading(false)
-        return // Nothing to search
+        return
       }
 
       const response = await fetch(`/api/search?${params.toString()}`, {
@@ -191,7 +203,6 @@ export default function Search() {
       setResults(list)
       if (list.length === 0) setError(t('search.no_results'))
         
-      // Save history on success (even if 0 results, valid query)
       saveToHistory({
         timestamp: Date.now(),
         db,
@@ -201,6 +212,44 @@ export default function Search() {
         summary
       })
 
+    } catch (err: any) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const doFederatedSearch = async (targetNames: string[], query: string) => {
+    setLoading(true)
+    setError('')
+    setResults([])
+    setRequestStatus(null)
+
+    try {
+      const params = new URLSearchParams()
+      params.append('targets', targetNames.join(','))
+      params.append('query', query)
+      params.append('limit', '10')
+
+      const response = await fetch(`/api/federated-search?${params.toString()}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+
+      if (!response.ok) throw new Error(`Error: ${response.statusText}`)
+      const data = await response.json()
+      if (data.error) throw new Error(data.error)
+
+      const list = data.data || []
+      setResults(list)
+      if (list.length === 0) setError(t('search.no_results'))
+
+      saveToHistory({
+        timestamp: Date.now(),
+        db: targetNames.join(','),
+        type: 'federated',
+        query: query,
+        summary: `[Federated: ${targetNames.length}] ${query}`
+      })
     } catch (err: any) {
       setError(err.message)
     } finally {
@@ -226,14 +275,25 @@ export default function Search() {
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (isAdvanced) {
+    if (isFederated) {
+      doFederatedSearch(selectedTargets, simpleQuery)
+    } else if (isAdvanced) {
       doSearch(targetDB, rows)
     } else {
       doSearch(targetDB, null, simpleQuery)
     }
   }
 
-  const handleILLRequest = async (book: Book) => {
+  const toggleTarget = (name: string) => {
+    if (selectedTargets.includes(name)) {
+      setSelectedTargets(selectedTargets.filter(t => t !== name))
+    } else {
+      setSelectedTargets([...selectedTargets, name])
+    }
+  }
+
+  const handleILLRequest = async (book: EnhancedBook) => {
+    const source = book.source_target || targetDB
     try {
       const response = await fetch('/api/ill-requests', {
         method: 'POST',
@@ -245,7 +305,7 @@ export default function Search() {
           title: book.title,
           author: book.author,
           isbn: book.isbn,
-          target_db: targetDB,
+          target_db: source,
           record_id: book.record_id || 'unknown'
         })
       })
@@ -274,21 +334,28 @@ export default function Search() {
     <>
       <article>
         <header>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div role="group">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+            <div role="group" style={{ marginBottom: 0 }}>
               <button 
-                className={!isAdvanced ? "" : "outline"} 
-                onClick={() => setIsAdvanced(false)}
-                style={{marginBottom: 0, fontSize: '0.9em', padding: '5px 15px'}}
+                className={(!isAdvanced && !isFederated) ? "" : "outline"} 
+                onClick={() => { setIsAdvanced(false); setIsFederated(false); }}
+                style={{fontSize: '0.9em', padding: '5px 15px'}}
               >
                 {t('search.simple')}
               </button>
               <button 
                 className={isAdvanced ? "" : "outline"} 
-                onClick={() => setIsAdvanced(true)}
-                style={{marginBottom: 0, fontSize: '0.9em', padding: '5px 15px'}}
+                onClick={() => { setIsAdvanced(true); setIsFederated(false); }}
+                style={{fontSize: '0.9em', padding: '5px 15px'}}
               >
                 {t('search.advanced')}
+              </button>
+              <button 
+                className={isFederated ? "" : "outline"} 
+                onClick={() => { setIsAdvanced(false); setIsFederated(true); }}
+                style={{fontSize: '0.9em', padding: '5px 15px'}}
+              >
+                🌐 Federated
               </button>
             </div>
             
@@ -303,40 +370,44 @@ export default function Search() {
                 </button>
               )}
               
-              <div style={{display: 'flex', flexDirection: 'column', gap: '2px'}}>
-                <small style={{fontSize: '0.7em'}}>Sort By</small>
-                <div style={{display: 'flex', gap: '5px'}}>
-                  <select 
-                    value={sortAttr} 
-                    onChange={(e) => setSortAttr(e.target.value)}
-                    style={{ width: 'auto', marginBottom: 0, padding: '5px', fontSize: '0.8em', height: 'auto' }}
-                  >
-                    <option value="4">{t('search.attr.title')}</option>
-                    <option value="1003">{t('search.attr.author')}</option>
-                    <option value="31">{t('search.attr.date')}</option>
-                  </select>
-                  <select 
-                    value={sortOrder} 
-                    onChange={(e) => setSortOrder(e.target.value)}
-                    style={{ width: 'auto', marginBottom: 0, padding: '5px', fontSize: '0.8em', height: 'auto' }}
-                  >
-                    <option value="asc">↑</option>
-                    <option value="desc">↓</option>
-                  </select>
-                </div>
-              </div>
+              {!isFederated && (
+                <>
+                  <div style={{display: 'flex', flexDirection: 'column', gap: '2px'}}>
+                    <small style={{fontSize: '0.7em'}}>Sort By</small>
+                    <div style={{display: 'flex', gap: '5px'}}>
+                      <select 
+                        value={sortAttr} 
+                        onChange={(e) => setSortAttr(e.target.value)}
+                        style={{ width: 'auto', marginBottom: 0, padding: '5px', fontSize: '0.8em', height: 'auto' }}
+                      >
+                        <option value="4">{t('search.attr.title')}</option>
+                        <option value="1003">{t('search.attr.author')}</option>
+                        <option value="31">{t('search.attr.date')}</option>
+                      </select>
+                      <select 
+                        value={sortOrder} 
+                        onChange={(e) => setSortOrder(e.target.value)}
+                        style={{ width: 'auto', marginBottom: 0, padding: '5px', fontSize: '0.8em', height: 'auto' }}
+                      >
+                        <option value="asc">↑</option>
+                        <option value="desc">↓</option>
+                      </select>
+                    </div>
+                  </div>
 
-              <div style={{display: 'flex', flexDirection: 'column', gap: '2px'}}>
-                <small style={{fontSize: '0.7em'}}>{t('search.target')}</small>
-                <select 
-                  value={targetDB} 
-                  onChange={(e) => setTargetDB(e.target.value)}
-                  style={{ width: 'auto', marginBottom: 0, padding: '5px', fontSize: '0.8em', height: 'auto' }}
-                >
-                  {targets.map(t => <option key={t} value={t}>{t}</option>)}
-                  {targets.length === 0 && <option value="LCDB">LCDB</option>}
-                </select>
-              </div>
+                  <div style={{display: 'flex', flexDirection: 'column', gap: '2px'}}>
+                    <small style={{fontSize: '0.7em'}}>{t('search.target')}</small>
+                    <select 
+                      value={targetDB} 
+                      onChange={(e) => setTargetDB(e.target.value)}
+                      style={{ width: 'auto', marginBottom: 0, padding: '5px', fontSize: '0.8em', height: 'auto' }}
+                    >
+                      {targets.map(t => <option key={t} value={t}>{t}</option>)}
+                      {targets.length === 0 && <option value="LCDB">LCDB</option>}
+                    </select>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </header>
@@ -362,12 +433,31 @@ export default function Search() {
           </div>
         )}
 
+        {isFederated && (
+          <div style={{ marginBottom: '20px', padding: '15px', border: '1px dashed #ccc', borderRadius: '8px' }}>
+            <small style={{ display: 'block', marginBottom: '10px', fontWeight: 'bold' }}>Select Targets for Federated Search:</small>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '15px' }}>
+              {targets.map(t => (
+                <label key={t} style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.9em', cursor: 'pointer' }}>
+                  <input 
+                    type="checkbox" 
+                    checked={selectedTargets.includes(t)}
+                    onChange={() => toggleTarget(t)}
+                    style={{ marginBottom: 0 }}
+                  />
+                  {t}
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+
         <form onSubmit={handleSearch}>
-          {!isAdvanced ? (
+          {(!isAdvanced) ? (
             <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
               <input 
                 type="search" 
-                placeholder={t('search.placeholder')} 
+                placeholder={isFederated ? "Search across all selected targets..." : t('search.placeholder')} 
                 value={simpleQuery}
                 onChange={(e) => setSimpleQuery(e.target.value)}
                 required
@@ -456,7 +546,7 @@ export default function Search() {
             <article key={index}>
               <div style={{ display: 'flex', gap: '20px', alignItems: 'flex-start' }}>
                 <div style={{ flexShrink: 0 }}>
-                  <Link to={`/book/${targetDB}/${encodeURIComponent(item.record_id || '')}`}>
+                  <Link to={`/book/${item.source_target || targetDB}/${encodeURIComponent(item.record_id || '')}`}>
                     <img 
                       src={item.isbn 
                         ? `https://covers.openlibrary.org/b/isbn/${cleanISBN(item.isbn)}-M.jpg?default=https://placehold.co/100x150/e0e0e0/808080?text=No+Cover`
@@ -477,11 +567,18 @@ export default function Search() {
                 
                 <div style={{ flexGrow: 1 }}>
                   <header style={{ marginBottom: '10px' }}>
-                    <strong>
-                      <Link to={`/book/${targetDB}/${encodeURIComponent(item.record_id || '')}`} style={{textDecoration: 'none', color: 'inherit'}}>
-                        {item.title || 'Untitled'}
-                      </Link>
-                    </strong>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <strong>
+                        <Link to={`/book/${item.source_target || targetDB}/${encodeURIComponent(item.record_id || '')}`} style={{textDecoration: 'none', color: 'inherit'}}>
+                          {item.title || 'Untitled'}
+                        </Link>
+                      </strong>
+                      {item.source_target && (
+                        <mark style={{ fontSize: '0.6em', padding: '2px 5px', borderRadius: '4px' }}>
+                          {item.source_target}
+                        </mark>
+                      )}
+                    </div>
                   </header>
                   <p style={{ marginBottom: '5px' }}><strong>Author:</strong> {item.author || 'Unknown'}</p>
                   <p style={{ marginBottom: '5px' }}><strong>ISBN:</strong> {item.isbn || 'Unknown'}</p>
