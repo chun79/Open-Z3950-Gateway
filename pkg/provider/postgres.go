@@ -413,7 +413,7 @@ func (p *PostgresProvider) GetILLRequest(id int64) (*ILLRequest, error) {
 }
 
 func (p *PostgresProvider) ListILLRequests() ([]ILLRequest, error) {
-	rows, err := p.db.Query("SELECT id, target_db, record_id, title, author, isbn, status, requestor FROM ill_requests ORDER BY created_at DESC")
+	rows, err := p.db.Query("SELECT id, target_db, record_id, title, author, isbn, status, requestor, comments FROM ill_requests ORDER BY created_at DESC")
 	if err != nil {
 		return nil, err
 	}
@@ -422,8 +422,12 @@ func (p *PostgresProvider) ListILLRequests() ([]ILLRequest, error) {
 	var requests []ILLRequest
 	for rows.Next() {
 		var r ILLRequest
-		if err := rows.Scan(&r.ID, &r.TargetDB, &r.RecordID, &r.Title, &r.Author, &r.ISBN, &r.Status, &r.Requestor); err != nil {
+		var comments sql.NullString
+		if err := rows.Scan(&r.ID, &r.TargetDB, &r.RecordID, &r.Title, &r.Author, &r.ISBN, &r.Status, &r.Requestor, &comments); err != nil {
 			return nil, err
+		}
+		if comments.Valid {
+			r.Comments = comments.String
 		}
 		requests = append(requests, r)
 	}
