@@ -1,29 +1,37 @@
 services:
-  app:
-    build: .
+  gateway:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    image: open-z3950-gateway:latest
+    container_name: z3950-gateway
+    restart: unless-stopped
     ports:
-      - "8899:8899" # Web UI + API Gateway
-      - "2100:2100" # Z39.50 Server
+      - "${PORT:-8899}:8899" # Web UI + API Gateway
+      - "${ZSERVER_PORT:-2100}:2100" # Z39.50 Server
     environment:
-      - DB_PROVIDER=postgres
-      - DB_DSN=host=db-test user=postgres password=example dbname=z3950 sslmode=disable
+      - DB_PROVIDER=${DB_PROVIDER:-sqlite}
+      - DB_PATH=/app/data/gateway.db
+      - DB_DSN=host=postgres-db user=postgres password=${POSTGRES_PASSWORD:-example} dbname=z3950 sslmode=disable
       - ZSERVER_PORT=2100
       - PORT=8899
-      - GATEWAY_API_KEY=123456
-      # Allow connections from anywhere (for demo)
-      - ZSERVER_ALLOWED_IPS=0.0.0.0/0 
+      - GATEWAY_API_KEY=${GATEWAY_API_KEY:-123456}
+      - ZSERVER_ALLOWED_IPS=${ZSERVER_ALLOWED_IPS:-0.0.0.0/0}
+    volumes:
+      - ./data/gateway:/app/data
     depends_on:
-      db-test:
+      postgres-db:
         condition: service_healthy
+        required: false # Only required if DB_PROVIDER=postgres
 
-  db-test:
+  postgres-db:
     image: postgres:15-alpine
+    container_name: z3950-postgres
+    profiles: ["with-postgres"] # Only starts if requested
     environment:
       - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=example
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-example}
       - POSTGRES_DB=z3950
-    ports:
-      - "5433:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
@@ -31,3 +39,7 @@ services:
       retries: 5
     volumes:
       - ./data/postgres:/var/lib/postgresql/data
+
+volumes:
+  gateway-data:
+  postgres-data:
