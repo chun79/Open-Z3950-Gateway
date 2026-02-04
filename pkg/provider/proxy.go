@@ -243,6 +243,12 @@ func (p *ProxyProvider) UpdateRecord(db string, id string, record *z3950.MARCRec
 	return fmt.Errorf("proxy provider is read-only")
 }
 
+func (p *ProxyProvider) CreateItem(bibID string, item Item) error { return fmt.Errorf("proxy is read-only") }
+func (p *ProxyProvider) GetItems(bibID string) ([]Item, error) { return []Item{}, nil }
+func (p *ProxyProvider) GetItemByBarcode(barcode string) (*Item, error) { return nil, fmt.Errorf("not found") }
+func (p *ProxyProvider) Checkout(itemBarcode, patronID string) (string, error) { return "", fmt.Errorf("proxy is read-only") }
+func (p *ProxyProvider) Checkin(itemBarcode string) (float64, error) { return 0, fmt.Errorf("proxy is read-only") }
+
 // Stub implementations for unsupported methods
 func (p *ProxyProvider) CreateILLRequest(req ILLRequest) error {
 	return fmt.Errorf("proxy provider does not support creating ILL requests locally")

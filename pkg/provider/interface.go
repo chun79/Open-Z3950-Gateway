@@ -50,6 +50,15 @@ type Target struct {
 	AuthPass     string `json:"auth_password"` // Optional
 }
 
+type Item struct {
+	ID         int64  `json:"id"`
+	BibID      int64  `json:"bib_id"`
+	Barcode    string `json:"barcode"`
+	CallNumber string `json:"call_number"`
+	Status     string `json:"status"` // "Available", "Checked Out"
+	Location   string `json:"location"`
+}
+
 type Provider interface {
 	// Search performs a Z39.50 search.
 	Search(db string, query z3950.StructuredQuery) ([]string, error)
@@ -64,6 +73,20 @@ type Provider interface {
 
 	// UpdateRecord modifies an existing local MARC record.
 	UpdateRecord(db string, id string, record *z3950.MARCRecord) error
+
+	// --- Item Management (Circulation Base) ---
+
+	CreateItem(bibID string, item Item) error
+	GetItems(bibID string) ([]Item, error)
+	GetItemByBarcode(barcode string) (*Item, error)
+
+	// --- Circulation Operations ---
+	
+	// Checkout performs a loan transaction. Returns due date.
+	Checkout(itemBarcode, patronID string) (string, error)
+	
+	// Checkin returns an item. Returns fine amount if overdue.
+	Checkin(itemBarcode string) (float64, error)
 
 	// --- Index Browsing ---
 

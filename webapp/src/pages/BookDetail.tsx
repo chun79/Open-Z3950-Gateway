@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useI18n } from '../context/I18nContext'
-import { Book } from '../types'
+import { Book, Holding } from '../types'
+import toast from 'react-hot-toast'
 
 export default function BookDetail() {
   const { db, id } = useParams<{ db: string, id: string }>()
@@ -13,38 +14,55 @@ export default function BookDetail() {
   const [book, setBook] = useState<Book | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [comments, setComments] = useState('')
-  const [requestStatus, setRequestStatus] = useState<{msg: string, type: 'success' | 'error'} | null>(null)
+  
+  // Item Management State
+  const [showAddItem, setShowAddItem] = useState(false)
+  const [newBarcode, setNewBarcode] = useState('')
+  const [newLocation, setNewLocation] = useState('Main Stack')
 
   const isLocal = db === 'Default'
 
-  useEffect(() => {
+  const fetchBook = async () => {
     if (!db || !id) return
-    const fetchBook = async () => {
-      setLoading(true)
-      try {
-        const response = await fetch(`/api/books/${db}/${encodeURIComponent(id)}`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        })
-        if (!response.ok) throw new Error("Failed to load book details")
-        const data = await response.json()
-        setBook(data.data)
-      } catch (err: any) { setError(err.message) } finally { setLoading(false) }
-    }
+    setLoading(true)
+    try {
+      const response = await fetch(`/api/books/${db}/${encodeURIComponent(id)}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      if (!response.ok) throw new Error("Failed to load book details")
+      const data = await response.json()
+      setBook(data.data)
+    } catch (err: any) { setError(err.message) } finally { setLoading(false) }
+  }
+
+  useEffect(() => {
     fetchBook()
   }, [db, id, token])
 
-  const handleILLRequest = async () => {
-    if (!book) return
+  const handleAddItem = async (e: React.FormEvent) => {
+    e.preventDefault()
     try {
-      const response = await fetch('/api/ill-requests', {
+      const res = await fetch('/api/items', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ title: book.title, author: book.author, isbn: book.isbn, target_db: db, record_id: book.record_id || id, comments })
+        body: JSON.stringify({
+          bib_id: id,
+          barcode: newBarcode,
+          location: newLocation,
+          call_number: book?.record_id // Simplified
+        })
       })
-      if (!response.ok) throw new Error('Request failed')
-      setRequestStatus({ msg: t('detail.request_success').replace('{title}', book.title), type: 'success' })
-    } catch (err: any) { setRequestStatus({ msg: t('detail.request_fail').replace('{error}', err.message), type: 'error' }) }
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.error || "Failed to add item")
+      }
+      toast.success("Item added successfully!")
+      setNewBarcode('')
+      setShowAddItem(false)
+      fetchBook() // Refresh list
+    } catch (err: any) {
+      toast.error(err.message)
+    }
   }
 
   if (loading) return <article aria-busy="true"></article>
@@ -77,17 +95,59 @@ export default function BookDetail() {
               <div><small>{t('detail.isbn')}</small><p><strong>{book.isbn}</strong></p></div>
               <div><small>Source</small><p><mark>{db}</mark></p></div>
             </div>
+            
             {book.summary && <details open><summary>{t('detail.summary')}</summary><p>{book.summary}</p></details>}
+            
             <hr />
-            {!isLocal && (
-              <>
-                <label htmlFor="comments">{t('detail.comments')}
-                  <textarea id="comments" value={comments} onChange={(e) => setComments(e.target.value)} placeholder="e.g. Need by Friday..." style={{ resize: 'vertical', minHeight: '80px' }} />
-                </label>
-                <button onClick={handleILLRequest}>{t('detail.request_btn')}</button>
-              </>
-            )}
-            {isLocal && <p>✅ This record is in your local collection.</p>}
+
+            {/* Holdings / Items Section */}
+            <section>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h4>🏛 Holdings & Availability</h4>
+                {isLocal && (
+                  <button className="outline secondary" onClick={() => setShowAddItem(!showAddItem)} style={{ padding: '2px 10px', fontSize: '0.8em' }}>
+                    {showAddItem ? 'Cancel' : '+ Add Copy'}
+                  </button>
+                )}
+              </div>
+
+              {showAddItem && (
+                <form onSubmit={handleAddItem} style={{ padding: '15px', background: '#f0f2f5', borderRadius: '8px', marginBottom: '15px' }}>
+                  <div className="grid">
+                    <input type="text" placeholder="Barcode (e.g. 10001)" value={newBarcode} onChange={e => setNewBarcode(e.target.value)} required />
+                    <input type="text" placeholder="Location" value={newLocation} onChange={e => setNewLocation(e.target.value)} />
+                    <button type="submit">Confirm Ingest</button>
+                  </div>
+                </form>
+              )}
+
+              {book.holdings && book.holdings.length > 0 ? (
+                <table className="striped">
+                  <thead>
+                    <tr>
+                      <th>Barcode / Call No.</th>
+                      <th>Location</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {book.holdings.map((h, i) => (
+                      <tr key={i}>
+                        <td><code>{h.call_number}</code></td>
+                        <td>{h.location}</td>
+                        <td>
+                          <ins style={{ color: h.status === 'Available' ? 'green' : 'orange', textDecoration: 'none', fontWeight: 'bold' }}>
+                            {h.status === 'Available' ? '✅ Available' : '📖 Out'}
+                          </ins>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <p style={{ color: '#666', fontStyle: 'italic' }}>No physical items found for this record.</p>
+              )}
+            </section>
           </div>
         </div>
       </article>

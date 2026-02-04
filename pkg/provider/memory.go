@@ -240,6 +240,12 @@ func (m *MemoryProvider) UpdateRecord(db string, id string, record *z3950.MARCRe
 	return fmt.Errorf("record not found")
 }
 
+func (m *MemoryProvider) CreateItem(bibID string, item Item) error { return nil }
+func (m *MemoryProvider) GetItems(bibID string) ([]Item, error) { return []Item{}, nil }
+func (m *MemoryProvider) GetItemByBarcode(barcode string) (*Item, error) { return nil, fmt.Errorf("not found") }
+func (m *MemoryProvider) Checkout(itemBarcode, patronID string) (string, error) { return "", fmt.Errorf("not implemented") }
+func (m *MemoryProvider) Checkin(itemBarcode string) (float64, error) { return 0, fmt.Errorf("not implemented") }
+
 func (m *MemoryProvider) CreateUser(user *User) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

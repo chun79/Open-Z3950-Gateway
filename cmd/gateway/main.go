@@ -762,6 +762,64 @@ func setupRouter(dbProvider provider.Provider) *gin.Engine {
 		c.JSON(201, gin.H{"status": "success", "id": id})
 	})
 
+	// --- Circulation APIs (LSP Phase 2) ---
+	
+	api.POST("/items", func(c *gin.Context) {
+		var req struct {
+			BibID      string `json:"bib_id"`
+			Barcode    string `json:"barcode"`
+			CallNumber string `json:"call_number"`
+			Location   string `json:"location"`
+		}
+		if err := c.BindJSON(&req); err != nil {
+			c.JSON(400, gin.H{"error": "Invalid item JSON"})
+			return
+		}
+		item := provider.Item{
+			Barcode:    req.Barcode,
+			CallNumber: req.CallNumber,
+			Location:   req.Location,
+		}
+		if err := dbProvider.CreateItem(req.BibID, item); err != nil {
+			c.JSON(500, gin.H{"error": "Failed to create item: " + err.Error()})
+			return
+		}
+		c.JSON(201, gin.H{"status": "success"})
+	})
+
+	api.POST("/circulation/checkout", func(c *gin.Context) {
+		var req struct {
+			Barcode  string `json:"barcode"`
+			PatronID string `json:"patron_id"`
+		}
+		if err := c.BindJSON(&req); err != nil {
+			c.JSON(400, gin.H{"error": "Invalid checkout request"})
+			return
+		}
+		dueDate, err := dbProvider.Checkout(req.Barcode, req.PatronID)
+		if err != nil {
+			c.JSON(400, gin.H{"error": "Checkout failed: " + err.Error()})
+			return
+		}
+		c.JSON(200, gin.H{"status": "success", "due_date": dueDate})
+	})
+
+	api.POST("/circulation/checkin", func(c *gin.Context) {
+		var req struct {
+			Barcode string `json:"barcode"`
+		}
+		if err := c.BindJSON(&req); err != nil {
+			c.JSON(400, gin.H{"error": "Invalid checkin request"})
+			return
+		}
+		fine, err := dbProvider.Checkin(req.Barcode)
+		if err != nil {
+			c.JSON(400, gin.H{"error": "Checkin failed: " + err.Error()})
+			return
+		}
+		c.JSON(200, gin.H{"status": "success", "fine": fine})
+	})
+
 	api.PUT("/books/:db/:id", func(c *gin.Context) {
 		db := c.Param("db")
 		id := c.Param("id")

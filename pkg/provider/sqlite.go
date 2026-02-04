@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	_ "modernc.org/sqlite"
 	"golang.org/x/crypto/bcrypt"
@@ -57,6 +58,7 @@ func NewSQLiteProvider(path string) (*SQLiteProvider, error) {
 		isbn TEXT,
 		status TEXT,
 		requestor TEXT,
+		comments TEXT,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 	`
@@ -121,7 +123,7 @@ func NewSQLiteProvider(path string) (*SQLiteProvider, error) {
 		}
 	}
 
-	// Ensure holdings table exists
+	// Ensure holdings table exists (Legacy table, might migrate to items later, but keep for now)
 	createHoldingsTableSQL := `
 	CREATE TABLE IF NOT EXISTS holdings (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -137,21 +139,38 @@ func NewSQLiteProvider(path string) (*SQLiteProvider, error) {
 		return nil, fmt.Errorf("failed to create holdings table: %w", err)
 	}
 
-	// Seed holdings if empty
-	var holdingCount int
-	db.QueryRow("SELECT COUNT(*) FROM holdings").Scan(&holdingCount)
-	if holdingCount == 0 {
-		// Just random seed for existing bibliographies (1-4)
-		seedHoldings := []string{
-			"INSERT INTO holdings (bib_id, call_number, status, location) VALUES (1, 'QA76.73.G63 D66 2015', 'Available', 'Main Library')",
-			"INSERT INTO holdings (bib_id, call_number, status, location) VALUES (1, 'QA76.73.G63 D66 2015 c.2', 'Checked Out', 'Main Library')",
-			"INSERT INTO holdings (bib_id, call_number, status, location) VALUES (2, 'QA76.73.G63 P55 2018', 'Available', 'Science Branch')",
-			"INSERT INTO holdings (bib_id, call_number, status, location) VALUES (3, 'QA76.73.G63 B88 2016', 'Lost', 'Main Library')",
-			"INSERT INTO holdings (bib_id, call_number, status, location) VALUES (4, 'QA76.9.A25 S74 2020', 'Available', 'Engineering Lib')",
-		}
-		for _, q := range seedHoldings {
-			db.Exec(q)
-		}
+	// Ensure items table exists (New for Circulation)
+	createItemsTableSQL := `
+	CREATE TABLE IF NOT EXISTS items (
+		id INTEGER PRIMARY KEY,
+		bib_id INTEGER,
+		barcode TEXT UNIQUE,
+		call_number TEXT,
+		status TEXT DEFAULT 'Available',
+		location TEXT,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+	`
+	if _, err := db.Exec(createItemsTableSQL); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to create items table: %w", err)
+	}
+
+	// Ensure loans table exists (New for Circulation)
+	createLoansTableSQL := `
+	CREATE TABLE IF NOT EXISTS loans (
+		id INTEGER PRIMARY KEY,
+		item_id INTEGER,
+		patron_id TEXT,
+		checkout_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+		due_date DATETIME,
+		return_date DATETIME,
+		status TEXT DEFAULT 'active'
+	);
+	`
+	if _, err := db.Exec(createLoansTableSQL); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to create loans table: %w", err)
 	}
 
 	format := os.Getenv("ZSERVER_MARC_FORMAT")
@@ -346,33 +365,41 @@ rows, err := p.db.Query(query, args...)
 		if rec != nil {
 			// Fetch holdings
 			if id.Valid {
-				hRows, err := p.db.Query("SELECT id, bib_id, call_number, status, location FROM holdings WHERE bib_id = ?", id.String)
+				// We query both 'items' (new) and 'holdings' (old) and merge them for now
+				var holdings []z3950.Holding
+				
+				// 1. New items table
+				iRows, err := p.db.Query("SELECT barcode, call_number, status, location FROM items WHERE bib_id = ?", id.String)
 				if err == nil {
-					defer hRows.Close()
-					var holdings []z3950.Holding
-					for hRows.Next() {
-						var h z3950.Holding
-						// Note: z3950 package doesn't have Holding struct, we defined it in provider.
-						// Wait, Fetch returns []*z3950.MARCRecord.
-						// MARCRecord doesn't have Holdings field.
-						// The interface Fetch returns []*z3950.MARCRecord.
-						// We need to attach holdings to MARCRecord or change the return type.
-						// Changing return type breaks everything.
-						// Best approach: Add Holdings field to z3950.MARCRecord struct.
-						
-						var hid int64
-						var bid, call, stat, loc string
-						if err := hRows.Scan(&hid, &bid, &call, &stat, &loc); err == nil {
-							h = z3950.Holding{
-								CallNumber: call,
-								Status:     stat,
-								Location:   loc,
-							}
-							holdings = append(holdings, h)
+					defer iRows.Close()
+					for iRows.Next() {
+						var bc, cn, st, loc sql.NullString
+						if err := iRows.Scan(&bc, &cn, &st, &loc); err == nil {
+							holdings = append(holdings, z3950.Holding{
+								CallNumber: bc.String + " " + cn.String, // Temp hack to show barcode
+								Status:     st.String,
+								Location:   loc.String,
+							})
 						}
 					}
-					rec.Holdings = holdings
 				}
+
+				// 2. Old holdings table (legacy support)
+				hRows, err := p.db.Query("SELECT call_number, status, location FROM holdings WHERE bib_id = ?", id.String)
+				if err == nil {
+					defer hRows.Close()
+					for hRows.Next() {
+						var cn, st, loc sql.NullString
+						if err := hRows.Scan(&cn, &st, &loc); err == nil {
+							holdings = append(holdings, z3950.Holding{
+								CallNumber: cn.String,
+								Status:     st.String,
+								Location:   loc.String,
+							})
+						}
+					}
+				}
+				rec.Holdings = holdings
 			}
 			records = append(records, rec)
 		}
@@ -458,8 +485,6 @@ func (p *SQLiteProvider) UpdateILLRequestStatus(id int64, status string) error {
 // --- Cataloging Implementation ---
 
 func (p *SQLiteProvider) CreateRecord(db string, record *z3950.MARCRecord) (string, error) {
-	// 1. Build MARC binary from fields if not present, or use raw
-	// For simplicity, let's assume we build it from the record fields to keep it fresh
 	marcData := z3950.BuildMARC(p.profile, "", 
 		record.GetTitle(p.profile), 
 		record.GetAuthor(p.profile), 
@@ -469,7 +494,6 @@ func (p *SQLiteProvider) CreateRecord(db string, record *z3950.MARCRecord) (stri
 		record.GetISSN(p.profile), 
 		record.GetSubject(p.profile))
 
-	// 2. Insert into DB
 	res, err := p.db.Exec(`
 		INSERT INTO bibliography (title, author, isbn, publisher, pub_year, issn, subjects, raw_record, raw_record_format)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -481,7 +505,7 @@ func (p *SQLiteProvider) CreateRecord(db string, record *z3950.MARCRecord) (stri
 		record.GetISSN(p.profile),
 		record.GetSubject(p.profile),
 		string(marcData),
-		"MARC21", // Or p.profile.Name
+		"MARC21",
 	)
 	if err != nil {
 		return "", err
@@ -516,6 +540,87 @@ func (p *SQLiteProvider) UpdateRecord(db string, id string, record *z3950.MARCRe
 		id,
 	)
 	return err
+}
+
+// --- Item & Circulation Implementation ---
+
+func (p *SQLiteProvider) CreateItem(bibID string, item Item) error {
+	_, err := p.db.Exec("INSERT INTO items (bib_id, barcode, call_number, status, location) VALUES (?, ?, ?, ?, ?)",
+		bibID, item.Barcode, item.CallNumber, "Available", item.Location)
+	return err
+}
+
+func (p *SQLiteProvider) GetItems(bibID string) ([]Item, error) {
+	rows, err := p.db.Query("SELECT id, bib_id, barcode, call_number, status, location FROM items WHERE bib_id = ?", bibID)
+	if err != nil { return nil, err }
+	defer rows.Close()
+
+	var items []Item
+	for rows.Next() {
+		var i Item
+		if err := rows.Scan(&i.ID, &i.BibID, &i.Barcode, &i.CallNumber, &i.Status, &i.Location); err != nil {
+			continue
+		}
+		items = append(items, i)
+	}
+	return items, nil
+}
+
+func (p *SQLiteProvider) GetItemByBarcode(barcode string) (*Item, error) {
+	var i Item
+	err := p.db.QueryRow("SELECT id, bib_id, barcode, call_number, status, location FROM items WHERE barcode = ?", barcode).
+		Scan(&i.ID, &i.BibID, &i.Barcode, &i.CallNumber, &i.Status, &i.Location)
+	if err != nil { return nil, err }
+	return &i, nil
+}
+
+func (p *SQLiteProvider) Checkout(itemBarcode, patronID string) (string, error) {
+	item, err := p.GetItemByBarcode(itemBarcode)
+	if err != nil { return "", fmt.Errorf("item not found") }
+	if item.Status != "Available" { return "", fmt.Errorf("item is already checked out or not available") }
+
+	dueDate := time.Now().Add(30 * 24 * time.Hour)
+	dueDateStr := dueDate.Format(time.RFC3339)
+
+	tx, err := p.db.Begin()
+	if err != nil { return "", err }
+
+	_, err = tx.Exec("INSERT INTO loans (item_id, patron_id, due_date, status) VALUES (?, ?, ?, ?)", 
+		item.ID, patronID, dueDate, "active")
+	if err != nil { tx.Rollback(); return "", err }
+
+	_, err = tx.Exec("UPDATE items SET status = 'Checked Out' WHERE id = ?", item.ID)
+	if err != nil { tx.Rollback(); return "", err }
+
+	return dueDateStr, tx.Commit()
+}
+
+func (p *SQLiteProvider) Checkin(itemBarcode string) (float64, error) {
+	item, err := p.GetItemByBarcode(itemBarcode)
+	if err != nil { return 0, fmt.Errorf("item not found") }
+	if item.Status == "Available" { return 0, fmt.Errorf("item is not checked out") }
+
+	var loanID int64
+	var dueDate time.Time
+	err = p.db.QueryRow("SELECT id, due_date FROM loans WHERE item_id = ? AND status = 'active'", item.ID).Scan(&loanID, &dueDate)
+	if err != nil { return 0, fmt.Errorf("no active loan found for item") }
+
+	fine := 0.0
+	if time.Now().After(dueDate) {
+		days := int(time.Since(dueDate).Hours() / 24)
+		if days > 0 { fine = float64(days) * 0.50 }
+	}
+
+	tx, err := p.db.Begin()
+	if err != nil { return 0, err }
+
+	_, err = tx.Exec("UPDATE loans SET return_date = ?, status = 'returned' WHERE id = ?", time.Now(), loanID)
+	if err != nil { tx.Rollback(); return 0, err }
+
+	_, err = tx.Exec("UPDATE items SET status = 'Available' WHERE id = ?", item.ID)
+	if err != nil { tx.Rollback(); return 0, err }
+
+	return fine, tx.Commit()
 }
 
 func (p *SQLiteProvider) CreateUser(user *User) error {

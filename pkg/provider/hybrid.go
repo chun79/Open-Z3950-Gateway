@@ -54,6 +54,12 @@ func (h *HybridProvider) UpdateRecord(db string, id string, record *z3950.MARCRe
 	return fmt.Errorf("cannot update record in remote database")
 }
 
+func (h *HybridProvider) CreateItem(bibID string, item Item) error { return h.local.CreateItem(bibID, item) }
+func (h *HybridProvider) GetItems(bibID string) ([]Item, error) { return h.local.GetItems(bibID) }
+func (h *HybridProvider) GetItemByBarcode(barcode string) (*Item, error) { return h.local.GetItemByBarcode(barcode) }
+func (h *HybridProvider) Checkout(itemBarcode, patronID string) (string, error) { return h.local.Checkout(itemBarcode, patronID) }
+func (h *HybridProvider) Checkin(itemBarcode string) (float64, error) { return h.local.Checkin(itemBarcode) }
+
 func (h *HybridProvider) Scan(db, field, startTerm string, opts z3950.ScanOptions) ([]ScanResult, error) {
 	if h.isLocalDB(db) {
 		return h.local.Scan(db, field, startTerm, opts)

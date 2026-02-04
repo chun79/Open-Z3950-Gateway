@@ -472,6 +472,12 @@ func (p *PostgresProvider) UpdateRecord(db string, id string, record *z3950.MARC
 	return err
 }
 
+func (p *PostgresProvider) CreateItem(bibID string, item Item) error { return fmt.Errorf("not implemented") }
+func (p *PostgresProvider) GetItems(bibID string) ([]Item, error) { return nil, fmt.Errorf("not implemented") }
+func (p *PostgresProvider) GetItemByBarcode(barcode string) (*Item, error) { return nil, fmt.Errorf("not implemented") }
+func (p *PostgresProvider) Checkout(itemBarcode, patronID string) (string, error) { return "", fmt.Errorf("not implemented") }
+func (p *PostgresProvider) Checkin(itemBarcode string) (float64, error) { return 0, fmt.Errorf("not implemented") }
+
 func (p *PostgresProvider) CreateUser(user *User) error {
 	_, err := p.db.Exec("INSERT INTO users (username, password_hash, role) VALUES ($1, $2, $3)", user.Username, user.PasswordHash, user.Role)
 	return err
