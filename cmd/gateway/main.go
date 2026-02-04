@@ -944,6 +944,118 @@ func setupRouter(dbProvider provider.Provider) *gin.Engine {
 		})
 	})
 
+	// @Summary Federated Search
+	// @Description Search multiple targets concurrently and return aggregated records
+	// @Tags Search
+	// @Security ApiKeyAuth
+	// @Security BearerAuth
+	// @Produce json
+	// @Param query query string true "Search Term"
+	// @Param targets query string true "Comma-separated list of target names (e.g. 'LCDB,Oxford')"
+	// @Param limit query int false "Max records per target"
+	// @Success 200 {object} map[string]interface{}
+	// @Router /api/federated-search [get]
+	api.GET("/federated-search", func(c *gin.Context) {
+		start := time.Now()
+		targetsStr := c.Query("targets")
+		queryTerm := c.Query("query")
+		if targetsStr == "" || queryTerm == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Missing 'targets' or 'query' parameter"})
+			return
+		}
+
+		limit := 5 // Default 5 records per target to keep it fast
+		if l := c.Query("limit"); l != "" {
+			if v, err := strconv.Atoi(l); err == nil && v > 0 {
+				limit = v
+			}
+		}
+
+		targetList := strings.Split(targetsStr, ",")
+		
+		// Prepare concurrency
+		var wg sync.WaitGroup
+		resultsChan := make(chan map[string]interface{}, len(targetList)*limit)
+		
+		// Construct the Z39.50 query structure once (simple query)
+		// For now federated search supports simple Term query on Attribute=Any (or Title)
+		zQuery := z3950.StructuredQuery{
+			Root: z3950.QueryClause{Attribute: z3950.UseAttributeAny, Term: queryTerm},
+		}
+
+		for _, dbName := range targetList {
+			dbName = strings.TrimSpace(dbName)
+			if dbName == "" { continue }
+
+			wg.Add(1)
+			go func(target string) {
+				defer wg.Done()
+				
+				// 1. Search
+				ids, err := dbProvider.Search(target, zQuery)
+				if err != nil {
+					slog.Warn("federated search error", "target", target, "error", err)
+					return
+				}
+
+				if len(ids) == 0 {
+					return
+				}
+
+				// 2. Limit fetch
+				fetchCount := limit
+				if len(ids) < fetchCount { fetchCount = len(ids) }
+				idsToFetch := ids[:fetchCount]
+
+				// 3. Fetch Records
+				records, err := dbProvider.Fetch(target, idsToFetch)
+				if err != nil {
+					slog.Warn("federated fetch error", "target", target, "error", err)
+					return
+				}
+
+				// 4. Convert to JSON
+				for _, rec := range records {
+					res := map[string]interface{}{
+						"source_target": target, // Tag the source
+						"record_id":     rec.RecordID,
+						"title":         rec.GetTitle(nil),
+						"author":        rec.GetAuthor(nil),
+						"isbn":          rec.GetISBN(nil),
+						"publisher":     rec.GetPublisher(nil),
+						"year":          rec.GetPubYear(nil), // Simplified field
+					}
+					resultsChan <- res
+				}
+			}(dbName)
+		}
+
+		// Wait and close
+		go func() {
+			wg.Wait()
+			close(resultsChan)
+		}()
+
+		// Collect results
+		aggregated := make([]map[string]interface{}, 0)
+		for res := range resultsChan {
+			aggregated = append(aggregated, res)
+		}
+
+		elapsed := time.Since(start)
+		slog.Info("federated search completed", 
+			"targets", len(targetList), 
+			"total_found", len(aggregated),
+			"latency_ms", elapsed.Milliseconds())
+
+		c.JSON(200, gin.H{
+			"status": "success",
+			"count":  len(aggregated),
+			"data":   aggregated,
+			"time_ms": elapsed.Milliseconds(),
+		})
+	})
+
 	api.PUT("/ill-requests/:id/status", func(c *gin.Context) {
 		idStr := c.Param("id")
 		id, err := strconv.ParseInt(idStr, 10, 64)

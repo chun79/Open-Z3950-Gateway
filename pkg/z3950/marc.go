@@ -248,6 +248,17 @@ func (r *MARCRecord) GetPublisher(p *MARCProfile) string {
 	}
 	return r.GetFieldByTag(p.PublisherTag)
 }
+
+func (r *MARCRecord) GetPubYear(p *MARCProfile) string {
+	if p == nil { p = &ProfileMARC21 }
+	// For MARC 21, year is usually in 260$c or 264$c
+	// Since GetFieldByTag currently returns the whole field string (cleaned),
+	// we have to rely on simple heuristic: extract the 4-digit year.
+	raw := r.GetPublisher(p)
+	re := regexp.MustCompile(`\d{4}`)
+	return re.FindString(raw)
+}
+
 func (r *MARCRecord) GetSubject(p *MARCProfile) string {
 	if p == nil { p = &ProfileMARC21 }
 	return r.GetFieldByTag(p.SubjectTag)
