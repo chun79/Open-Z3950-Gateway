@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { Book } from '../types'
 import { useI18n } from '../context/I18nContext'
-import { Search as WailsSearch, ListTargets, SaveBook, ListSearchHistory, ClearSearchHistory } from '../../wailsjs/go/main/App'
+import { StreamingSearch, ListTargets, SaveBook, ListSearchHistory, ClearSearchHistory } from '../../wailsjs/go/main/App'
+import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
 import { SkeletonCard } from '../components/Skeletons'
 
 export default function Search() {
@@ -32,6 +33,25 @@ export default function Search() {
       if (names.length > 0) setSelectedDBs([names[0]]) // Select first by default
     })
     loadHistory()
+
+    // --- Setup Wails Event Listeners for Streaming ---
+    const offResult = EventsOn("search-result", (res: any) => {
+      setResults(prev => {
+        // Prevent duplicates if same record comes from multiple sources (optional)
+        const exists = prev.some(b => b.isbn === res.isbn && b.title === res.title && (b as any).source_db === res.source_db);
+        if (exists) return prev;
+        return [...prev, res];
+      });
+    });
+
+    const offComplete = EventsOn("search-complete", () => {
+      setLoading(false);
+    });
+
+    return () => {
+      offResult();
+      offComplete();
+    };
   }, [])
 
   const loadHistory = () => {
@@ -55,18 +75,18 @@ export default function Search() {
     setResults([])
 
     try {
-      const data = await WailsSearch({
+      // Call Go Backend (Non-blocking streaming method)
+      await StreamingSearch({
         dbs: selectedDBs,
         term: term,
         attr: parseInt(attr)
       })
       
-      setResults(data || [])
-      if (!data || data.length === 0) setError(t('search.no_results'))
+      // Note: We don't set loading=false here because the search is async.
+      // Loading state will be cleared by the "search-complete" event.
       loadHistory()
     } catch (err: any) {
       setError(String(err))
-    } finally {
       setLoading(false)
     }
   }
@@ -193,43 +213,38 @@ export default function Search() {
 
       {error && <article className="pico-background-red-200">❌ {error}</article>}
 
-      {loading ? (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: '20px' }}>
-          {[1, 2, 3, 4].map(i => <SkeletonCard key={i} />)}
-        </div>
-      ) : results.length > 0 ? (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: '20px' }}>
-          {results.map((item, index) => (
-            <article key={index} style={{ position: 'relative' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
-                <Link to={`/book/${(item as any).source_db}/${item.isbn || item.record_id}`} style={{ textDecoration: 'none', color: 'inherit', flexGrow: 1 }}>
-                  <strong>{item.title || t('common.untitled')}</strong>
-                </Link>
-                <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
-                  {(item as any).source_db && (
-                    <mark style={{ fontSize: '0.6em', padding: '2px 6px', borderRadius: '4px', whiteSpace: 'nowrap' }}>
-                      {(item as any).source_db}
-                    </mark>
-                  )}
-                  <button 
-                    className="outline secondary" 
-                    style={{ padding: '2px 6px', fontSize: '0.8em', border: 'none', marginBottom: 0 }}
-                    onClick={() => handleSave(item)}
-                    title="Save to Bookshelf"
-                  >
-                    ⭐
-                  </button>
-                </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: '20px' }}>
+        {loading && results.length === 0 && [1, 2, 3, 4].map(i => <SkeletonCard key={i} />)}
+        {results.map((item, index) => (
+          <article key={index} style={{ position: 'relative' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
+              <Link to={`/book/${(item as any).source_db}/${item.isbn || item.record_id}`} style={{ textDecoration: 'none', color: 'inherit', flexGrow: 1 }}>
+                <strong>{item.title || t('common.untitled')}</strong>
+              </Link>
+              <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
+                {(item as any).source_db && (
+                  <mark style={{ fontSize: '0.6em', padding: '2px 6px', borderRadius: '4px', whiteSpace: 'nowrap' }}>
+                    {(item as any).source_db}
+                  </mark>
+                )}
+                <button 
+                  className="outline secondary" 
+                  style={{ padding: '2px 6px', fontSize: '0.8em', border: 'none', marginBottom: 0 }}
+                  onClick={() => handleSave(item)}
+                  title="Save to Bookshelf"
+                >
+                  ⭐
+                </button>
               </div>
-              
-              <div style={{ fontSize: '0.9em' }}>
-                <p style={{ marginBottom: '5px' }}><strong>{t('search.attr.author')}:</strong> {item.author || t('common.unknown')}</p>
-                <p style={{ marginBottom: '5px' }}><strong>ISBN:</strong> {item.isbn}</p>
-              </div>
-            </article>
-          ))}
-        </div>
-      ) : null}
+            </div>
+            
+            <div style={{ fontSize: '0.9em' }}>
+              <p style={{ marginBottom: '5px' }}><strong>{t('search.attr.author')}:</strong> {item.author || t('common.unknown')}</p>
+              <p style={{ marginBottom: '5px' }}><strong>ISBN:</strong> {item.isbn}</p>
+            </div>
+          </article>
+        ))}
+      </div>
     </>
   )
 }

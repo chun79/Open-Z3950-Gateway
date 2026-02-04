@@ -271,6 +271,91 @@ func (a *App) DeleteILLRequest(id int64) error {
 	return a.db.DeleteILLRequest(id)
 }
 
+// StreamingSearch performs a Z39.50 search and emits results via events as they arrive.
+func (a *App) StreamingSearch(params SearchParams) error {
+	if a.db != nil && params.Term != "" {
+		a.db.SaveSearchHistory(params.Term)
+	}
+	if len(params.DBs) == 0 {
+		return fmt.Errorf("no targets selected")
+	}
+
+	attr := 4 // Title
+	if params.Attr != 0 {
+		attr = params.Attr
+	}
+
+	var wg sync.WaitGroup
+	for _, targetName := range params.DBs {
+		wg.Add(1)
+		go func(name string) {
+			defer wg.Done()
+
+			// Resolve target
+			target, found := a.config.GetTarget(name)
+			if !found {
+				// Fallback for default names
+				if name == "Library of Congress" {
+					target = Target{Host: "lx2.loc.gov", Port: 210, DB: "LCDB", Encoding: "MARC21"}
+				} else if name == "Oxford University" {
+					target = Target{Host: "library.ox.ac.uk", Port: 210, DB: "MAIN_BIB", Encoding: "MARC21"}
+				} else {
+					return
+				}
+			}
+
+			client := z3950.NewClient(target.Host, target.Port)
+			if err := client.Connect(); err != nil {
+				return
+			}
+			defer client.Close()
+
+			if err := client.Init(); err != nil {
+				return
+			}
+
+			query := z3950.StructuredQuery{
+				Root: z3950.QueryClause{Attribute: attr, Term: params.Term},
+			}
+
+			count, err := client.StructuredSearch(target.DB, query)
+			if err != nil {
+				return
+			}
+
+			if count > 0 {
+				limit := 10
+				if count < limit {
+					limit = count
+				}
+				recs, err := client.Present(1, limit, z3950.OID_MARC21)
+				if err != nil {
+					return
+				}
+
+				for _, r := range recs {
+					res := SearchResult{
+						SourceDB: name,
+						Title:    r.GetTitle(nil),
+						Author:   r.GetAuthor(nil),
+						ISBN:     r.GetISBN(nil),
+					}
+					// Emit each result immediately!
+					runtime.EventsEmit(a.ctx, "search-result", res)
+				}
+			}
+		}(targetName)
+	}
+
+	// We don't block the frontend here, but we wait for wg to clean up goroutines
+	go func() {
+		wg.Wait()
+		runtime.EventsEmit(a.ctx, "search-complete", true)
+	}()
+
+	return nil
+}
+
 // Search performs a Z39.50 search concurrently
 func (a *App) Search(params SearchParams) ([]SearchResult, error) {
 	if a.db != nil && params.Term != "" {
