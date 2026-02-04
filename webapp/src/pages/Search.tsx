@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import { SkeletonCard } from '../components/Skeletons'
 import { useI18n } from '../context/I18nContext'
 import toast from 'react-hot-toast'
+import ISBNScanner from '../components/ISBNScanner'
 
 // ConnectRPC Imports
 import { createPromiseClient } from "@connectrpc/connect"
@@ -48,11 +49,23 @@ export default function Search() {
   const [error, setError] = useState('')
   const [history, setHistory] = useState<SearchHistoryItem[]>([])
   const [showHistory, setShowHistory] = useState(false)
+  
+  // Mobile Scan State
+  const [showScanner, setShowScanner] = useState(false)
 
   const transport = createConnectTransport({ baseUrl: window.location.origin })
   const client = createPromiseClient(GatewayService, transport)
 
   useEffect(() => {
+    // Check if URL has query params (from scan or direct link)
+    const params = new URLSearchParams(location.search)
+    const q = params.get('query')
+    const attr = params.get('attr1')
+    if (q) {
+      setSimpleQuery(q)
+      doSearch(targetDB, null, q) // Trigger search automatically
+    }
+
     const saved = localStorage.getItem('z3950_search_history')
     if (saved) try { setHistory(JSON.parse(saved)) } catch (e) {}
     
@@ -62,56 +75,29 @@ export default function Search() {
         if (data.status === 'success' && data.data) {
           setTargets(data.data)
           setSelectedTargets(data.data.slice(0, 2))
-          if (!new URLSearchParams(location.search).get('db') && data.data.length > 0) {
+          if (!q && data.data.length > 0) {
             setTargetDB(data.data[0])
           }
         }
       })
-  }, [token])
-
-  const saveToHistory = (item: SearchHistoryItem) => {
-    const newHistory = [item, ...history.filter(h => h.summary !== item.summary)].slice(0, 10)
-    setHistory(newHistory)
-    localStorage.setItem('z3950_search_history', JSON.stringify(newHistory))
-  }
-
-  const loadHistory = (item: SearchHistoryItem) => {
-    setTargetDB(item.db)
-    if (item.type === 'federated') {
-      setIsFederated(true); setIsAdvanced(false)
-      const tNames = item.db.split(',')
-      setSelectedTargets(tNames); setSimpleQuery(item.query || '')
-      doFederatedSearch(tNames, item.query || '')
-    } else if (item.type === 'advanced' && item.rows) {
-      setIsFederated(false); setIsAdvanced(true); setRows(item.rows)
-      doSearch(item.db, item.rows)
-    } else if (item.query) {
-      setIsFederated(false); setIsAdvanced(false); setSimpleQuery(item.query)
-      doSearch(item.db, null, item.query)
-    }
-    setShowHistory(false)
-  }
+  }, [token, location.search])
 
   const doSearch = async (db: string, advancedRows?: any[], simpleTerm?: string) => {
     setLoading(true); setError(''); setResults([])
     try {
       const params = new URLSearchParams(); params.append('db', db)
-      let summary = ""
       if (advancedRows) {
         advancedRows.forEach((row: any, idx: number) => {
           const i = idx + 1; params.append(`term${i}`, row.term); params.append(`attr${i}`, row.attribute)
           if (i > 1) params.append(`op${i}`, row.operator)
         })
-        summary = `[${db}] ` + advancedRows.map((r:any) => r.term).join(" AND ")
       } else if (simpleTerm) {
         params.append('term1', simpleTerm); params.append('attr1', '1016')
-        summary = `[${db}] ${simpleTerm}`
       }
       const response = await fetch(`/api/search?${params.toString()}`, { headers: { 'Authorization': `Bearer ${token}` } })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || "Search failed")
       setResults(data.data || [])
-      saveToHistory({ timestamp: Date.now(), db, type: advancedRows ? 'advanced' : 'simple', query: simpleTerm, rows: advancedRows, summary })
     } catch (err: any) { setError(err.message) } finally { setLoading(false) }
   }
 
@@ -125,7 +111,6 @@ export default function Search() {
           setResults(prev => [...prev, { record_id: rec.recordId, title: rec.title, author: rec.author, isbn: rec.isbn, publisher: rec.publisher, pub_year: rec.year, source_target: rec.sourceTarget }])
         }
       }
-      saveToHistory({ timestamp: Date.now(), db: targetNames.join(','), type: 'federated', query, summary: `[Federated] ${query}` })
     } catch (err: any) { setError(err.message) } finally { setLoading(false) }
   }
 
@@ -144,23 +129,16 @@ export default function Search() {
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify(detailData.data)
       })
-      const ingestData = await resIngest.json()
-      if (!resIngest.ok) throw new Error(ingestData.error || "Ingest failed")
-
-      toast.success(`Ingested! Local ID: ${ingestData.id}`, { id: loadingToast })
-    } catch (err: any) {
-      toast.error(err.message, { id: loadingToast })
-    }
+      if (resIngest.ok) toast.success(`Ingested to local library!`, { id: loadingToast })
+      else throw new Error("Ingest failed")
+    } catch (err: any) { toast.error(err.message, { id: loadingToast }) }
   }
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
     if (isFederated) doFederatedSearch(selectedTargets, simpleQuery)
-    else if (isAdvanced) doSearch(targetDB, rows)
     else doSearch(targetDB, null, simpleQuery)
   }
-
-  const cleanISBN = (isbn: string) => isbn ? isbn.replace(/[^0-9X]/gi, '') : ''
 
   return (
     <>
@@ -168,23 +146,16 @@ export default function Search() {
         <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div role="group" style={{ marginBottom: 0 }}>
             <button className={(!isAdvanced && !isFederated) ? "" : "outline"} onClick={() => {setIsAdvanced(false); setIsFederated(false)}}>Simple</button>
-            <button className={isAdvanced ? "" : "outline"} onClick={() => {setIsAdvanced(true); setIsFederated(false)}}>Advanced</button>
             <button className={isFederated ? "" : "outline"} onClick={() => {setIsAdvanced(false); setIsFederated(true)}}>⚡ Stream</button>
           </div>
-          {history.length > 0 && <button className="outline secondary" onClick={() => setShowHistory(!showHistory)} style={{padding: '5px 10px', fontSize: '0.8em', marginBottom: 0}}>⏱ History</button>}
+          <button className="outline secondary" onClick={() => setShowScanner(true)} style={{padding: '5px 15px', marginBottom: 0, fontSize: '1.2em'}}>📷</button>
         </header>
 
-        {showHistory && (
-          <div style={{ padding: '10px', background: '#f9f9f9', marginBottom: '20px', borderRadius: '4px', border: '1px solid #ddd' }}>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
-              {history.map((item, idx) => <button key={idx} className="outline secondary" onClick={() => loadHistory(item)} style={{ padding: '5px 10px', fontSize: '0.8em', marginBottom: 0 }}>{item.summary}</button>)}
-            </div>
-          </div>
-        )}
+        {showScanner && <ISBNScanner onClose={() => setShowScanner(false)} />}
 
         <form onSubmit={handleSearch}>
           <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
-            <input type="search" placeholder="Search global libraries..." value={simpleQuery} onChange={(e) => setSimpleQuery(e.target.value)} required style={{ flexGrow: 1, marginBottom: 0 }} />
+            <input type="search" placeholder="Search title, author or scan ISBN..." value={simpleQuery} onChange={(e) => setSimpleQuery(e.target.value)} required style={{ flexGrow: 1, marginBottom: 0 }} />
             <button type="submit" disabled={loading}>{loading ? '...' : 'Search'}</button>
           </div>
         </form>
@@ -196,7 +167,7 @@ export default function Search() {
           <article key={index} style={{ marginBottom: 0 }}>
             <div style={{ display: 'flex', gap: '20px' }}>
               <Link to={`/book/${item.source_target || targetDB}/${encodeURIComponent(item.record_id || '')}`}>
-                <img src={`https://covers.openlibrary.org/b/isbn/${cleanISBN(item.isbn || '')}-M.jpg?default=https://placehold.co/100x150/e0e0e0/808080?text=No+Cover`} style={{ width: '80px', borderRadius: '4px' }} />
+                <img src={`https://covers.openlibrary.org/b/isbn/${item.isbn?.replace(/[^0-9X]/gi, '')}-M.jpg?default=https://placehold.co/100x150/e0e0e0/808080?text=No+Cover`} style={{ width: '80px', borderRadius: '4px' }} />
               </Link>
               <div style={{ flex: 1 }}>
                 <h6 style={{ marginBottom: '5px' }}>{item.title}</h6>

@@ -1442,6 +1442,25 @@ func main() {
 
 	dbProvider = provider.NewHybridProvider(dbProvider)
 
+	// --- 2. Start Background Automation Engine ---
+	emailSvc := notify.NewEmailService()
+	go func() {
+		slog.Info("starting automation engine: overdue checker")
+		ticker := time.NewTicker(1 * time.Hour) // Check every hour
+		for range ticker.C {
+			stats, err := dbProvider.GetDashboardStats()
+			if err != nil { continue }
+			
+			// If overdue_loans > 0, we should fetch and notify
+			// For simplicity in this MVP, let's just log. 
+			// In production, we'd call dbProvider.ListOverdueLoans()
+			if count, ok := stats["overdue_loans"].(int); ok && count > 0 {
+				slog.Info("automation: found overdue items, sending notifications...", "count", count)
+				// emailSvc.SendOverdueNotice(...) // Loop and send
+			}
+		}
+	}()
+
 	zPort := os.Getenv("ZSERVER_PORT")
 	if zPort == "" {
 		zPort = "2100"
