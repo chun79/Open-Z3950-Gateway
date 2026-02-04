@@ -2,8 +2,8 @@ package provider
 
 import (
 	"net"
-	"testing"
 	"strings"
+	"testing"
 
 	"github.com/go-asn1-ber/asn1-ber"
 	"github.com/yourusername/open-z3950-gateway/pkg/z3950"
@@ -34,7 +34,9 @@ func (s *MockZServer) Close() {
 func (s *MockZServer) serve() {
 	for {
 		conn, err := s.listener.Accept()
-		if err != nil { return }
+		if err != nil {
+			return
+		}
 		go s.handle(conn)
 	}
 }
@@ -43,17 +45,22 @@ func (s *MockZServer) handle(conn net.Conn) {
 	defer conn.Close()
 	for {
 		pkt, err := ber.ReadPacket(conn)
-		if err != nil { return }
-		
+		if err != nil {
+			return
+		}
+
 		var resp *ber.Packet
 		switch pkt.Tag {
 		case 20: // Init
 			resp = ber.Encode(ber.ClassContext, ber.TypeConstructed, 21, nil, "InitResp")
-			resp.AppendChild(ber.NewBoolean(ber.ClassUniversal, ber.TypePrimitive, ber.TagBoolean, true, "Result"))
+			// Result [12] IMPLICIT BOOLEAN
+			resp.AppendChild(ber.NewBoolean(ber.ClassContext, ber.TypePrimitive, 12, true, "Result"))
 		case 22: // Search
 			resp = ber.Encode(ber.ClassContext, ber.TypeConstructed, 23, nil, "SearchResp")
-			resp.AppendChild(ber.NewBoolean(ber.ClassUniversal, ber.TypePrimitive, ber.TagBoolean, true, "Status"))
-			resp.AppendChild(ber.NewInteger(ber.ClassUniversal, ber.TypePrimitive, ber.TagInteger, 1, "Count")) 
+			// ResultCount [23] IMPLICIT INTEGER
+			resp.AppendChild(ber.NewInteger(ber.ClassContext, ber.TypePrimitive, 23, 1, "Count"))
+			// SearchStatus [26] IMPLICIT BOOLEAN
+			resp.AppendChild(ber.NewBoolean(ber.ClassContext, ber.TypePrimitive, 26, true, "Status"))
 		case 24: // Present
 			resp = ber.Encode(ber.ClassContext, ber.TypeConstructed, 25, nil, "PresentResp")
 			recs := ber.Encode(ber.ClassContext, ber.TypeConstructed, 28, nil, "Records")
@@ -76,7 +83,7 @@ func TestHybridProvider(t *testing.T) {
 	// 1. Setup Local Provider (Memory)
 	local := NewMemoryProvider()
 	local.AddBook("Local Title", "Local Author", "000", "LocalPub", "2020", "", "LocalSub")
-	
+
 	// 2. Setup Hybrid
 	hybrid := NewHybridProvider(local)
 
@@ -89,7 +96,7 @@ func TestHybridProvider(t *testing.T) {
 	if len(ids) != 1 {
 		t.Errorf("Expected 1 local result, got %d", len(ids))
 	}
-	
+
 	recs, err := hybrid.Fetch("Local", ids)
 	if err != nil {
 		t.Fatalf("Local fetch failed: %v", err)
@@ -122,7 +129,6 @@ func TestHybridProvider(t *testing.T) {
 		t.Fatalf("Remote search failed: %v", err)
 	}
 	// Proxy provider mocks returning count based on server response (1 in mock)
-	// Proxy implementation creates fake IDs "1", "2"... based on count.
 	if len(rIds) != 1 {
 		t.Errorf("Expected 1 remote result, got %d", len(rIds))
 	}

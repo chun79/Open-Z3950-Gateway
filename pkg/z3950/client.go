@@ -578,12 +578,6 @@ func (c *Client) Sort(resultSetName string, keys []SortKey) error {
 		useAttr.AppendChild(ber.NewInteger(ber.ClassUniversal, ber.TypePrimitive, ber.TagInteger, int64(k.Attribute), "Value"))
 		list.AppendChild(useAttr)
 
-		// Relation Attribute (Sort Relation: 1=Ascending, 2=Descending)
-		relVal := 1 // Default Ascending
-		if k.Relation == 1 { relVal = 2 } // Descending
-		
-		relAttr := ber.Encode(ber.ClassUniversal, ber.TypeConstructed, ber.TagSequence, nil, "Attr")
-		relAttr.AppendChild(ber.NewInteger(ber.ClassUniversal, ber.TypePrimitive, ber.TagInteger, 2, "Type")) // 2 = Relation
 		// Relation: 3=Equal (default?), 1=Less, 2=LE... 
 		// Actually, for Sort, Bib-1 Relation values are often repurposed or specific sort attributes used.
 		// Standard Sort Relation attribute (type 7?): 1=Ascending, 2=Descending.

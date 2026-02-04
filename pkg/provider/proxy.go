@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/rand"
@@ -31,7 +32,7 @@ func friendlyError(target string, action string, err error) error {
 
 	// Log original error for debugging but return friendly one
 	slog.Error("Z39.50 Error", "target", target, "action", action, "original_error", err)
-	return fmt.Errorf(friendly)
+	return errors.New(friendly)
 }
 
 // TargetConfig holds connection details for a remote Z39.50 server
@@ -81,7 +82,7 @@ func (p *ProxyProvider) connectToTarget(targetName string) (*z3950.Client, Targe
 		client.Close()
 		return nil, config, friendlyError(targetName, "init", err)
 	}
-	
+
 	return client, config, nil
 }
 
@@ -129,7 +130,7 @@ func (p *ProxyProvider) Search(db string, query z3950.StructuredQuery) ([]string
 		// Return IDs in format "sessionID:index"
 		ids[i] = fmt.Sprintf("%s:%d", sessionID, i+1)
 	}
-	
+
 	return ids, nil
 }
 
@@ -175,7 +176,7 @@ func (p *ProxyProvider) Fetch(db string, ids []string) ([]*z3950.MARCRecord, err
 		if err != nil {
 			continue
 		}
-		
+
 		recs, err := client.Present(idx, 1, syntaxOID)
 		if err != nil {
 			slog.Warn("failed to fetch record", "db", db, "index", idx, "error", err)
