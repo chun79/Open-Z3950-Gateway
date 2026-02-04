@@ -55,7 +55,6 @@ export default function Search() {
     setResults([])
 
     try {
-      // Call Go Backend
       const data = await WailsSearch({
         dbs: selectedDBs,
         term: term,
@@ -64,7 +63,7 @@ export default function Search() {
       
       setResults(data || [])
       if (!data || data.length === 0) setError(t('search.no_results'))
-      loadHistory() // Refresh history
+      loadHistory()
     } catch (err: any) {
       setError(String(err))
     } finally {
@@ -74,8 +73,6 @@ export default function Search() {
 
   const handleHistoryClick = (h: string) => {
     setTerm(h)
-    // Optional: Auto-trigger search? Better to let user click search or just fill input.
-    // Let's just fill input for now.
   }
 
   const handleSave = async (book: Book) => {
@@ -103,7 +100,14 @@ export default function Search() {
   return (
     <>
       <article>
-        <header><strong>Broadcast Search</strong></header>
+        <header>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <strong>Broadcast Search</strong>
+            <small style={{ fontSize: '0.7em', color: '#666' }}>
+              Searching {selectedDBs.length} targets
+            </small>
+          </div>
+        </header>
         <form onSubmit={handleSearch}>
           <div className="grid">
             <select 
@@ -122,15 +126,26 @@ export default function Search() {
               style={{ flexGrow: 1 }}
             />
             <button type="submit" disabled={loading}>
-              {loading ? 'Searching...' : t('search.button')}
+              {loading ? '...' : t('search.button')}
             </button>
           </div>
 
           <details style={{ marginTop: '10px' }}>
-            <summary>Select Libraries ({selectedDBs.length})</summary>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '10px', padding: '10px', background: 'var(--pico-card-background-color)', border: '1px solid var(--pico-muted-border-color)', borderRadius: '4px' }}>
+            <summary style={{ fontSize: '0.9em', cursor: 'pointer' }}>
+              Select Libraries <span style={{ opacity: 0.6 }}>({selectedDBs.join(', ')})</span>
+            </summary>
+            <div style={{ 
+              display: 'grid', 
+              gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', 
+              gap: '10px', 
+              padding: '15px', 
+              background: 'var(--pico-card-background-color)', 
+              border: '1px solid var(--pico-muted-border-color)', 
+              borderRadius: '4px',
+              marginTop: '10px'
+            }}>
               {targets.map(t => (
-                <label key={t}>
+                <label key={t} style={{ fontSize: '0.9em', cursor: 'pointer' }}>
                   <input 
                     type="checkbox" 
                     checked={selectedDBs.includes(t)} 
@@ -143,7 +158,6 @@ export default function Search() {
           </details>
         </form>
         
-        {/* Search History Chips */}
         {history.length > 0 && !loading && results.length === 0 && !error && (
           <div style={{ marginTop: '15px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -153,7 +167,7 @@ export default function Search() {
                 style={{ border: 'none', padding: '0 5px', fontSize: '0.7em', height: 'auto', marginBottom: 0 }}
                 onClick={handleClearHistory}
               >
-                Clear All
+                Clear
               </button>
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '5px' }}>
@@ -186,24 +200,31 @@ export default function Search() {
       ) : results.length > 0 ? (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: '20px' }}>
           {results.map((item, index) => (
-            <article key={index}>
-              <header style={{ padding: '10px 15px', borderBottom: '1px solid #eee', fontSize: '0.8em', color: '#666', backgroundColor: '#f9f9f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span>🏛 {(item as any).source_db}</span>
-                <button 
-                  className="outline secondary" 
-                  style={{ padding: '2px 8px', fontSize: '0.9em', border: 'none', marginBottom: 0 }}
-                  onClick={() => handleSave(item)}
-                  title="Save to Bookshelf"
-                >
-                  ⭐ Save
-                </button>
-              </header>
-              <div style={{ padding: '15px' }}>
-                <Link to={`/book/${(item as any).source_db}/${item.isbn || item.record_id}`}>
-                  <h5>{item.title || t('common.untitled')}</h5>
+            <article key={index} style={{ position: 'relative' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
+                <Link to={`/book/${(item as any).source_db}/${item.isbn || item.record_id}`} style={{ textDecoration: 'none', color: 'inherit', flexGrow: 1 }}>
+                  <strong>{item.title || t('common.untitled')}</strong>
                 </Link>
-                <p><strong>{t('search.attr.author')}:</strong> {item.author || t('common.unknown')}</p>
-                <p><strong>ISBN:</strong> {item.isbn}</p>
+                <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
+                  {(item as any).source_db && (
+                    <mark style={{ fontSize: '0.6em', padding: '2px 6px', borderRadius: '4px', whiteSpace: 'nowrap' }}>
+                      {(item as any).source_db}
+                    </mark>
+                  )}
+                  <button 
+                    className="outline secondary" 
+                    style={{ padding: '2px 6px', fontSize: '0.8em', border: 'none', marginBottom: 0 }}
+                    onClick={() => handleSave(item)}
+                    title="Save to Bookshelf"
+                  >
+                    ⭐
+                  </button>
+                </div>
+              </div>
+              
+              <div style={{ fontSize: '0.9em' }}>
+                <p style={{ marginBottom: '5px' }}><strong>{t('search.attr.author')}:</strong> {item.author || t('common.unknown')}</p>
+                <p style={{ marginBottom: '5px' }}><strong>ISBN:</strong> {item.isbn}</p>
               </div>
             </article>
           ))}
