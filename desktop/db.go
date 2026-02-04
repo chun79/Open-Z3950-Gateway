@@ -86,10 +86,13 @@ func NewDBManager() (*DBManager, error) {
 	return &DBManager{db: db}, nil
 }
 
-func (m *DBManager) SaveBook(book SearchResult, notes string) error {
-	_, err := m.db.Exec("INSERT INTO saved_books (title, author, isbn, source_db, notes) VALUES (?, ?, ?, ?, ?)",
+func (m *DBManager) SaveBook(book SearchResult, notes string) (int64, error) {
+	res, err := m.db.Exec("INSERT INTO saved_books (title, author, isbn, source_db, notes) VALUES (?, ?, ?, ?, ?)",
 		book.Title, book.Author, book.ISBN, book.SourceDB, notes)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
 }
 
 func (m *DBManager) ListBooks() ([]SavedBook, error) {

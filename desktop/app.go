@@ -9,14 +9,16 @@ import (
 	"sync"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"github.com/yourusername/open-z3950-gateway/pkg/index"
 	"github.com/yourusername/open-z3950-gateway/pkg/z3950"
 )
 
 // App struct
 type App struct {
-	ctx    context.Context
-	config *ConfigManager
-	db     *DBManager
+	ctx     context.Context
+	config  *ConfigManager
+	db      *DBManager
+	indexer *index.Manager
 }
 
 // NewApp creates a new App application struct
@@ -31,9 +33,18 @@ func NewApp() (*App, error) {
 		return nil, fmt.Errorf("database init error: %w", err)
 	}
 
+	// Initialize Bleve Index in user config dir
+	configDir, _ := os.UserConfigDir()
+	indexPath := fmt.Sprintf("%s/OpenZ3950Desktop/books.bleve", configDir)
+	idx, err := index.NewManager(indexPath)
+	if err != nil {
+		return nil, fmt.Errorf("index init error: %w", err)
+	}
+
 	return &App{
-		config: cm,
-		db:     db,
+		config:  cm,
+		db:      db,
+		indexer: idx,
 	}, nil
 }
 
@@ -45,7 +56,21 @@ func (a *App) startup(ctx context.Context) {
 
 func (a *App) SaveBook(book SearchResult) error {
 	if a.db == nil { return fmt.Errorf("db not initialized") }
-	return a.db.SaveBook(book, "")
+	id, err := a.db.SaveBook(book, "")
+	if err != nil { return err }
+
+	// Index in Bleve
+	doc := index.BookDocument{
+		ID:     fmt.Sprintf("%d", id),
+		Title:  book.Title,
+		Author: book.Author,
+		ISBN:   book.ISBN,
+	}
+	if err := a.indexer.IndexBook(doc); err != nil {
+		slog.Error("failed to index book", "id", id, "error", err)
+		// Don't fail the save operation
+	}
+	return nil
 }
 
 func (a *App) ListSavedBooks() []SavedBook {
@@ -54,9 +79,42 @@ func (a *App) ListSavedBooks() []SavedBook {
 	return list
 }
 
+// SearchLocalBooks performs a full-text search on the local bookshelf
+func (a *App) SearchLocalBooks(query string) []SavedBook {
+	if a.indexer == nil || query == "" { return a.ListSavedBooks() }
+	
+	hits, err := a.indexer.Search(query)
+	if err != nil {
+		slog.Error("local search failed", "error", err)
+		return []SavedBook{}
+	}
+
+	// Fetch details from DB for each hit
+	// This is N+1 but efficient enough for local use (<1000 items)
+	// Optimization: Add GetBooksByIDs to DBManager
+	var results []SavedBook
+	allBooks, _ := a.db.ListBooks() // Naive: load all then filter. Better: SQL WHERE id IN (...)
+	
+	// Create map for O(1) lookup
+	bookMap := make(map[string]SavedBook)
+	for _, b := range allBooks {
+		bookMap[fmt.Sprintf("%d", b.ID)] = b
+	}
+
+	for _, hit := range hits {
+		if b, ok := bookMap[hit.ID]; ok {
+			results = append(results, b)
+		}
+	}
+	return results
+}
+
 func (a *App) DeleteSavedBook(id int64) error {
 	if a.db == nil { return fmt.Errorf("db not initialized") }
-	return a.db.DeleteBook(id)
+	if err := a.db.DeleteBook(id); err != nil { return err }
+	
+	// Remove from index
+	return a.indexer.DeleteBook(fmt.Sprintf("%d", id))
 }
 
 func (a *App) ListSearchHistory() []string {

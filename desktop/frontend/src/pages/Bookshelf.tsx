@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { Trash2, Book as BookIcon, Download } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useI18n } from '../context/I18nContext'
-import { ListSavedBooks, DeleteSavedBook, ExportBookshelf } from '../../wailsjs/go/main/App'
+import { ListSavedBooks, DeleteSavedBook, ExportBookshelf, SearchLocalBooks } from '../../wailsjs/go/main/App'
 
 interface SavedBook {
   id: number
@@ -18,65 +18,76 @@ export default function Bookshelf() {
   const [books, setBooks] = useState<SavedBook[]>([])
   const [filter, setFilter] = useState('')
   
-  const fetchBooks = () => {
-    ListSavedBooks().then((data: any) => setBooks(data || []))
+  const refreshBooks = (query: string) => {
+    if (!query) {
+      ListSavedBooks().then((data: any) => setBooks(data || []))
+    } else {
+      SearchLocalBooks(query).then((data: any) => setBooks(data || []))
+    }
   }
 
-  const handleDelete = (id: number) => {
-// ...
+  const handleDelete = async (id: number) => {
+    try {
+      await DeleteSavedBook(id)
+      toast.success("Deleted")
+      refreshBooks(filter)
+    } catch (e) {
+      toast.error("Failed to delete")
+    }
   }
 
   const handleExport = async () => {
-// ...
+    try {
+      await ExportBookshelf()
+      toast.success("Exported successfully")
+    } catch (e) {
+      toast.error("Export failed: " + e)
+    }
   }
 
   useEffect(() => {
-    fetchBooks()
-  }, [])
-
-  const filteredBooks = books.filter(b => 
-    b.title.toLowerCase().includes(filter.toLowerCase()) || 
-    b.author.toLowerCase().includes(filter.toLowerCase()) ||
-    b.source_db.toLowerCase().includes(filter.toLowerCase())
-  )
+    // Debounce search
+    const timer = setTimeout(() => {
+      refreshBooks(filter)
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [filter])
 
   return (
     <article>
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <strong>📚 My Local Bookshelf</strong>
-        {books.length > 0 && (
-          <div style={{ display: 'flex', gap: '10px' }}>
-            <input 
-              type="search" 
-              placeholder="Filter..." 
-              value={filter}
-              onChange={e => setFilter(e.target.value)}
-              style={{ marginBottom: 0, padding: '4px 8px', fontSize: '0.9em', width: '200px' }}
-            />
-            <button 
-              className="outline secondary" 
-              onClick={handleExport}
-              style={{ padding: '4px 12px', fontSize: '0.8em', marginBottom: 0, display: 'flex', alignItems: 'center', gap: '5px' }}
-            >
-              <Download size={16} /> Export CSV
-            </button>
-          </div>
-        )}
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <input 
+            type="search" 
+            placeholder="Full-text search..." 
+            value={filter}
+            onChange={e => setFilter(e.target.value)}
+            style={{ marginBottom: 0, padding: '4px 8px', fontSize: '0.9em', width: '250px' }}
+          />
+          <button 
+            className="outline secondary" 
+            onClick={handleExport}
+            style={{ padding: '4px 12px', fontSize: '0.8em', marginBottom: 0, display: 'flex', alignItems: 'center', gap: '5px' }}
+          >
+            <Download size={16} /> Export
+          </button>
+        </div>
       </header>
       
-      {books.length === 0 ? (
+      {books.length === 0 && !filter ? (
         <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--pico-muted-color)' }}>
           <BookIcon size={48} style={{ opacity: 0.5, marginBottom: '10px' }} />
           <p>No books saved yet.</p>
           <small>Go to Search and save some books to build your collection!</small>
         </div>
-      ) : filteredBooks.length === 0 ? (
+      ) : books.length === 0 && filter ? (
         <div style={{ textAlign: 'center', padding: '20px', color: 'var(--pico-muted-color)' }}>
-          <p>No matches for "{filter}"</p>
+          <p>No matches found for "{filter}"</p>
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '20px' }}>
-          {filteredBooks.map(b => (
+          {books.map(b => (
             <article key={b.id} style={{ marginBottom: 0, position: 'relative' }}>
               <header style={{ padding: '10px', fontSize: '0.8em', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ opacity: 0.7 }}>{b.source_db}</span>
