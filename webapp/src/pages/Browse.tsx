@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useI18n } from '../context/I18nContext'
+import { SkeletonCard } from '../components/Skeletons'
 
 interface ScanResult {
   term: string
@@ -19,6 +20,10 @@ export default function Browse() {
   const [targets, setTargets] = useState<string[]>([])
   const [targetDB, setTargetDB] = useState('LCDB')
   const [scanField, setScanField] = useState('title')
+  
+  // New State for pagination
+  const [scanPosition, setScanPosition] = useState(1) // Default: term is first
+  
   const { token } = useAuth()
   const { t } = useI18n()
   const navigate = useNavigate()
@@ -35,21 +40,44 @@ export default function Browse() {
       .catch(console.error)
   }, [token])
 
-  const executeScan = async (scanTerm: string) => {
+  const executeScan = async (scanTerm: string, position: number = 1, append: 'none' | 'top' | 'bottom' = 'none') => {
     setLoading(true)
     setError('')
-    setResults([])
+    
+    // If not appending, clear results immediately
+    if (append === 'none') setResults([])
 
     try {
-      const response = await fetch(`/api/scan?term=${encodeURIComponent(scanTerm)}&db=${encodeURIComponent(targetDB)}&field=${encodeURIComponent(scanField)}`, {
+      const params = new URLSearchParams()
+      params.append('term', scanTerm)
+      params.append('db', targetDB)
+      params.append('field', scanField)
+      params.append('position', position.toString())
+      params.append('count', '20')
+
+      const response = await fetch(`/api/scan?${params.toString()}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       })
-      if (!response.ok) {
-        throw new Error(`Error: ${response.statusText}`)
-      }
+      
+      if (!response.ok) throw new Error(`Error: ${response.statusText}`)
+      
       const data = await response.json()
       const list = data.data || []
-      setResults(list)
+      
+      if (append === 'top') {
+        // Remove the last item (which duplicates the scan term) if overlap occurs
+        // Z39.50 scan logic can be tricky.
+        // Simplified: Just prepend.
+        setResults([...list, ...results])
+      } else if (append === 'bottom') {
+        // Z39.50 Scan usually returns the startTerm as first item if position=1.
+        // So we might have a duplicate.
+        const newList = list.length > 0 && list[0].term === scanTerm ? list.slice(1) : list
+        setResults([...results, ...newList])
+      } else {
+        setResults(list)
+      }
+      
     } catch (err: any) {
       setError(err.message)
     } finally {
@@ -59,30 +87,43 @@ export default function Browse() {
 
   const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    executeScan(term)
+    setScanPosition(1) // Reset to standard forward scan
+    executeScan(term, 1)
   }
 
   const handleAlphaClick = (letter: string) => {
     setTerm(letter)
-    executeScan(letter)
+    setScanPosition(1)
+    executeScan(letter, 1)
   }
 
   const handleTermClick = (item: ScanResult) => {
-    // Map scan field to search attribute
-    // Title -> 4, Author -> 1003, Subject -> 21
     let attr = '4'
     if (scanField === 'author') attr = '1003'
     if (scanField === 'subject') attr = '21'
-    
-    // Navigate to Search with query params
     navigate(`/?term=${encodeURIComponent(item.term)}&attr=${attr}&db=${targetDB}`)
+  }
+
+  const loadPrevious = () => {
+    if (results.length === 0) return
+    // To see what's before the first item, we scan that item but ask for it to be at position 21 (end of new list)
+    // So we get 20 items BEFORE it.
+    const firstTerm = results[0].term
+    executeScan(firstTerm, 21, 'top')
+  }
+
+  const loadNext = () => {
+    if (results.length === 0) return
+    // Standard forward scan from last item
+    const lastTerm = results[results.length - 1].term
+    executeScan(lastTerm, 1, 'bottom')
   }
 
   return (
     <>
       <article>
         <header>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
             <strong>{t('browse.title')}</strong>
             <select 
               value={targetDB} 
@@ -140,19 +181,60 @@ export default function Browse() {
       )}
 
       {results.length > 0 && (
-        <div className="grid">
-          {results.map((item, index) => (
-            <article key={index} className="scan-card" onClick={() => handleTermClick(item)} style={{ cursor: 'pointer', marginBottom: '10px' }}>
-              <header style={{ padding: '10px' }}>
-                <strong>{item.term}</strong>
-              </header>
-              <div style={{ padding: '0 10px 10px' }}>
-                <small>{t('browse.records_found')} <mark>{item.count}</mark></small>
+        <div style={{ marginTop: '20px' }}>
+          <button 
+            className="secondary outline" 
+            onClick={loadPrevious}
+            disabled={loading}
+            style={{ width: '100%', marginBottom: '10px' }}
+          >
+            ⬆ Load Previous
+          </button>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0' }}>
+            {results.map((item, index) => (
+              <div 
+                key={`${item.term}-${index}`} 
+                onClick={() => handleTermClick(item)} 
+                className="scan-row"
+                style={{ 
+                  padding: '12px', 
+                  borderBottom: '1px solid #eee', 
+                  cursor: 'pointer',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  backgroundColor: item.term === term ? '#f0f8ff' : 'transparent'
+                }}
+              >
+                <span style={{ fontWeight: item.term === term ? 'bold' : 'normal' }}>
+                  {item.term}
+                </span>
+                <span style={{ 
+                  backgroundColor: '#e0e0e0', 
+                  padding: '2px 8px', 
+                  borderRadius: '10px', 
+                  fontSize: '0.8em',
+                  color: '#555'
+                }}>
+                  {item.count}
+                </span>
               </div>
-            </article>
-          ))}
+            ))}
+          </div>
+
+          <button 
+            className="secondary outline" 
+            onClick={loadNext}
+            disabled={loading}
+            style={{ width: '100%', marginTop: '10px' }}
+          >
+            ⬇ Load Next
+          </button>
         </div>
       )}
+      
+      {loading && results.length === 0 && <SkeletonCard />}
       
       {results.length === 0 && !loading && !error && term && (
         <p style={{ textAlign: 'center', marginTop: '20px' }}>{t('browse.no_entries').replace('{term}', term)}</p>
