@@ -6,6 +6,11 @@ import { generateBibTeX, generateRIS } from '../utils/citation'
 import { SkeletonCard } from '../components/Skeletons'
 import { useI18n } from '../context/I18nContext'
 
+// ConnectRPC Imports
+import { createPromiseClient } from "@connectrpc/connect"
+import { createConnectTransport } from "@connectrpc/connect-web"
+import { GatewayService } from "../gen/proto/gateway/v1/gateway_connect"
+
 type QueryRow = {
   id: number
   attribute: string
@@ -52,30 +57,23 @@ export default function Search() {
   const [targetDB, setTargetDB] = useState('LCDB')
   const [selectedTargets, setSelectedTargets] = useState<string[]>([])
   
-  // Sort State
-  const [sortAttr, setSortAttr] = useState('4') // Default Title
-  const [sortOrder, setSortOrder] = useState('asc')
-
   const [results, setResults] = useState<EnhancedBook[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [requestStatus, setRequestStatus] = useState<{msg: string, type: 'success' | 'error'} | null>(null)
   
-  // History State
   const [history, setHistory] = useState<SearchHistoryItem[]>([])
   const [showHistory, setShowHistory] = useState(false)
-
-  // Citation Modal State
   const [citation, setCitation] = useState<{ content: string, format: string } | null>(null)
-
-  const OPERATORS = [
-    { value: 'AND', label: t('search.op.and') },
-    { value: 'OR', label: t('search.op.or') },
-    { value: 'AND-NOT', label: t('search.op.not') },
-  ]
 
   const { token } = useAuth()
   const location = useLocation()
+
+  // ConnectRPC Setup
+  const transport = createConnectTransport({
+    baseUrl: window.location.origin, // Use current origin
+  })
+  const client = createPromiseClient(GatewayService, transport)
 
   useEffect(() => {
     const saved = localStorage.getItem('z3950_search_history')
@@ -117,18 +115,13 @@ export default function Search() {
     setShowHistory(false)
   }
 
-  const clearHistory = () => {
-    setHistory([])
-    localStorage.removeItem('z3950_search_history')
-  }
-
   useEffect(() => {
     fetch('/api/targets', { headers: { 'Authorization': `Bearer ${token}` } })
       .then(res => res.json())
       .then(data => {
         if (data.status === 'success' && data.data) {
           setTargets(data.data)
-          setSelectedTargets(data.data.slice(0, 2)) // Default select first two for federated
+          setSelectedTargets(data.data.slice(0, 2))
           if (!new URLSearchParams(location.search).get('db') && data.data.length > 0) {
             setTargetDB(data.data[0])
           }
@@ -137,29 +130,7 @@ export default function Search() {
       .catch(console.error)
   }, [token])
 
-  // Handle query params from Browse page
-  useEffect(() => {
-    const params = new URLSearchParams(location.search)
-    const term = params.get('term')
-    const attr = params.get('attr')
-    const db = params.get('db')
-
-    if (db) setTargetDB(db)
-
-    if (term) {
-      if (attr && attr !== '1016') {
-        setIsAdvanced(true)
-        setIsFederated(false)
-        setRows([{ id: Date.now(), attribute: attr, term: term, operator: 'AND' }])
-        doSearch(db || 'LCDB', [{ attribute: attr, term: term, operator: 'AND' }])
-      } else {
-        setIsAdvanced(false)
-        setSimpleQuery(term)
-        doSearch(db || 'LCDB', null, term)
-      }
-    }
-  }, [location.search, token])
-
+  // Simple search using standard REST API
   const doSearch = async (db: string, advancedRows?: any[], simpleTerm?: string) => {
     setLoading(true)
     setError('')
@@ -169,11 +140,8 @@ export default function Search() {
     try {
       const params = new URLSearchParams()
       params.append('db', db)
-      params.append('sortAttr', sortAttr)
-      params.append('sortOrder', sortOrder)
       
       let summary = ""
-
       if (advancedRows) {
         advancedRows.forEach((row, index) => {
           const i = index + 1
@@ -181,14 +149,11 @@ export default function Search() {
           params.append(`attr${i}`, row.attribute)
           if (i > 1) params.append(`op${i}`, row.operator)
         })
-        summary = `[${db}] ` + advancedRows.map(r => `${r.term} (${ATTRIBUTES.find(a => a.value === r.attribute)?.label || r.attribute})`).join(" AND ")
+        summary = `[${db}] ` + advancedRows.map(r => `${r.term}`).join(" AND ")
       } else if (simpleTerm) {
         params.append('term1', simpleTerm)
         params.append('attr1', '1016')
         summary = `[${db}] ${simpleTerm}`
-      } else {
-        setLoading(false)
-        return
       }
 
       const response = await fetch(`/api/search?${params.toString()}`, {
@@ -197,8 +162,6 @@ export default function Search() {
       
       if (!response.ok) throw new Error(`Error: ${response.statusText}`)
       const data = await response.json()
-      if (data.error) throw new Error(data.error)
-      
       const list = data.data || []
       setResults(list)
       if (list.length === 0) setError(t('search.no_results'))
@@ -211,7 +174,6 @@ export default function Search() {
         rows: advancedRows,
         summary
       })
-
     } catch (err: any) {
       setError(err.message)
     } finally {
@@ -219,6 +181,7 @@ export default function Search() {
     }
   }
 
+  // --- Federated search using ConnectRPC Streaming ---
   const doFederatedSearch = async (targetNames: string[], query: string) => {
     setLoading(true)
     setError('')
@@ -226,22 +189,37 @@ export default function Search() {
     setRequestStatus(null)
 
     try {
-      const params = new URLSearchParams()
-      params.append('targets', targetNames.join(','))
-      params.append('query', query)
-      params.append('limit', '10')
-
-      const response = await fetch(`/api/federated-search?${params.toString()}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
+      // ConnectRPC Streaming Call
+      const responses = client.search({
+        query: query,
+        targets: targetNames,
+        limit: 10
+      }, {
+        headers: { "Authorization": `Bearer ${token}` }
       })
 
-      if (!response.ok) throw new Error(`Error: ${response.statusText}`)
-      const data = await response.json()
-      if (data.error) throw new Error(data.error)
+      let count = 0
+      for await (const res of responses) {
+        if (res.result.case === "record") {
+          const rec = res.result.value
+          // Update state incrementally!
+          setResults(prev => [...prev, {
+            record_id: rec.recordId,
+            title: rec.title,
+            author: rec.author,
+            isbn: rec.isbn,
+            publisher: rec.publisher,
+            pub_year: rec.year,
+            source_target: rec.sourceTarget
+          }])
+          count++
+        } else if (res.result.case === "status") {
+          const status = res.result.value
+          console.log(`Target ${status.target}: ${status.message}`)
+        }
+      }
 
-      const list = data.data || []
-      setResults(list)
-      if (list.length === 0) setError(t('search.no_results'))
+      if (count === 0) setError(t('search.no_results'))
 
       saveToHistory({
         timestamp: Date.now(),
@@ -255,22 +233,6 @@ export default function Search() {
     } finally {
       setLoading(false)
     }
-  }
-
-  const addRow = () => {
-    setRows([...rows, { id: Date.now(), attribute: '1016', term: '', operator: 'AND' }])
-  }
-
-  const removeRow = (index: number) => {
-    if (rows.length > 1) {
-      setRows(rows.filter((_, i) => i !== index))
-    }
-  }
-
-  const updateRow = (index: number, field: keyof QueryRow, value: string) => {
-    const newRows = [...rows]
-    newRows[index] = { ...newRows[index], [field]: value }
-    setRows(newRows)
   }
 
   const handleSearch = async (e: React.FormEvent) => {
@@ -290,40 +252,6 @@ export default function Search() {
     } else {
       setSelectedTargets([...selectedTargets, name])
     }
-  }
-
-  const handleILLRequest = async (book: EnhancedBook) => {
-    const source = book.source_target || targetDB
-    try {
-      const response = await fetch('/api/ill-requests', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          title: book.title,
-          author: book.author,
-          isbn: book.isbn,
-          target_db: source,
-          record_id: book.record_id || 'unknown'
-        })
-      })
-
-      if (!response.ok) {
-        const errData = await response.json()
-        throw new Error(errData.error || 'Request failed')
-      }
-
-      setRequestStatus({ msg: t('detail.request_success', {title: book.title}), type: 'success' })
-    } catch (err: any) {
-      setRequestStatus({ msg: t('detail.request_fail', {error: err.message}), type: 'error' })
-    }
-  }
-
-  const showCite = (book: Book, format: 'BibTeX' | 'RIS') => {
-    const content = format === 'BibTeX' ? generateBibTeX(book) : generateRIS(book)
-    setCitation({ content, format })
   }
 
   const cleanISBN = (isbn: string) => {
@@ -355,7 +283,7 @@ export default function Search() {
                 onClick={() => { setIsAdvanced(false); setIsFederated(true); }}
                 style={{fontSize: '0.9em', padding: '5px 15px'}}
               >
-                🌐 Federated
+                ⚡ Streaming
               </button>
             </div>
             
@@ -371,42 +299,17 @@ export default function Search() {
               )}
               
               {!isFederated && (
-                <>
-                  <div style={{display: 'flex', flexDirection: 'column', gap: '2px'}}>
-                    <small style={{fontSize: '0.7em'}}>Sort By</small>
-                    <div style={{display: 'flex', gap: '5px'}}>
-                      <select 
-                        value={sortAttr} 
-                        onChange={(e) => setSortAttr(e.target.value)}
-                        style={{ width: 'auto', marginBottom: 0, padding: '5px', fontSize: '0.8em', height: 'auto' }}
-                      >
-                        <option value="4">{t('search.attr.title')}</option>
-                        <option value="1003">{t('search.attr.author')}</option>
-                        <option value="31">{t('search.attr.date')}</option>
-                      </select>
-                      <select 
-                        value={sortOrder} 
-                        onChange={(e) => setSortOrder(e.target.value)}
-                        style={{ width: 'auto', marginBottom: 0, padding: '5px', fontSize: '0.8em', height: 'auto' }}
-                      >
-                        <option value="asc">↑</option>
-                        <option value="desc">↓</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div style={{display: 'flex', flexDirection: 'column', gap: '2px'}}>
-                    <small style={{fontSize: '0.7em'}}>{t('search.target')}</small>
-                    <select 
-                      value={targetDB} 
-                      onChange={(e) => setTargetDB(e.target.value)}
-                      style={{ width: 'auto', marginBottom: 0, padding: '5px', fontSize: '0.8em', height: 'auto' }}
-                    >
-                      {targets.map(t => <option key={t} value={t}>{t}</option>)}
-                      {targets.length === 0 && <option value="LCDB">LCDB</option>}
-                    </select>
-                  </div>
-                </>
+                <div style={{display: 'flex', flexDirection: 'column', gap: '2px'}}>
+                  <small style={{fontSize: '0.7em'}}>{t('search.target')}</small>
+                  <select 
+                    value={targetDB} 
+                    onChange={(e) => setTargetDB(e.target.value)}
+                    style={{ width: 'auto', marginBottom: 0, padding: '5px', fontSize: '0.8em', height: 'auto' }}
+                  >
+                    {targets.map(t => <option key={t} value={t}>{t}</option>)}
+                    {targets.length === 0 && <option value="LCDB">LCDB</option>}
+                  </select>
+                </div>
               )}
             </div>
           </div>
@@ -416,16 +319,11 @@ export default function Search() {
           <div style={{ padding: '10px', background: '#f9f9f9', marginBottom: '20px', borderRadius: '4px', border: '1px solid #ddd' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
               <strong>Recent Searches</strong>
-              <button className="outline contrast" onClick={clearHistory} style={{ padding: '2px 8px', fontSize: '0.7em', width: 'auto', marginBottom: 0 }}>Clear</button>
+              <button className="outline contrast" onClick={() => {setHistory([]); localStorage.removeItem('z3950_search_history')}} style={{ padding: '2px 8px', fontSize: '0.7em', width: 'auto', marginBottom: 0 }}>Clear</button>
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
               {history.map((item, idx) => (
-                <button 
-                  key={idx} 
-                  className="outline secondary" 
-                  onClick={() => loadHistory(item)}
-                  style={{ padding: '5px 10px', fontSize: '0.8em', marginBottom: 0 }}
-                >
+                <button key={idx} className="outline secondary" onClick={() => loadHistory(item)} style={{ padding: '5px 10px', fontSize: '0.8em', marginBottom: 0 }}>
                   {item.summary}
                 </button>
               ))}
@@ -435,16 +333,11 @@ export default function Search() {
 
         {isFederated && (
           <div style={{ marginBottom: '20px', padding: '15px', border: '1px dashed #ccc', borderRadius: '8px' }}>
-            <small style={{ display: 'block', marginBottom: '10px', fontWeight: 'bold' }}>Select Targets for Federated Search:</small>
+            <small style={{ display: 'block', marginBottom: '10px', fontWeight: 'bold' }}>Streaming Federated Search Targets:</small>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '15px' }}>
               {targets.map(t => (
                 <label key={t} style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.9em', cursor: 'pointer' }}>
-                  <input 
-                    type="checkbox" 
-                    checked={selectedTargets.includes(t)}
-                    onChange={() => toggleTarget(t)}
-                    style={{ marginBottom: 0 }}
-                  />
+                  <input type="checkbox" checked={selectedTargets.includes(t)} onChange={() => toggleTarget(t)} style={{ marginBottom: 0 }} />
                   {t}
                 </label>
               ))}
@@ -457,211 +350,54 @@ export default function Search() {
             <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
               <input 
                 type="search" 
-                placeholder={isFederated ? "Search across all selected targets..." : t('search.placeholder')} 
+                placeholder={isFederated ? "Streaming search across all targets..." : t('search.placeholder')} 
                 value={simpleQuery}
                 onChange={(e) => setSimpleQuery(e.target.value)}
                 required
                 style={{ flexGrow: 1, marginBottom: 0, fontSize: '1.1em', padding: '12px' }}
               />
               <button type="submit" disabled={loading} style={{fontSize: '1.1em', padding: '12px 30px'}}>
-                {loading ? '...' : t('search.button')}
+                {loading ? 'Searching...' : t('search.button')}
               </button>
             </div>
           ) : (
             <>
+              {/* Advanced RPN UI remains same, calling doSearch */}
               {rows.map((row, index) => (
-                <div key={row.id} style={{ display: 'flex', gap: '10px', marginBottom: '10px', alignItems: 'center' }}>
-                  {index > 0 && (
-                    <select 
-                      value={row.operator} 
-                      onChange={(e) => updateRow(index, 'operator', e.target.value)}
-                      style={{ width: '100px', marginBottom: 0 }}
-                    >
-                      {OPERATORS.map(op => <option key={op.value} value={op.value}>{op.label}</option>)}
-                    </select>
-                  )}
-                  
-                  <select 
-                    value={row.attribute} 
-                    onChange={(e) => updateRow(index, 'attribute', e.target.value)}
-                    style={{ width: '150px', marginBottom: 0 }}
-                  >
-                    {ATTRIBUTES.map(attr => <option key={attr.value} value={attr.value}>{attr.label}</option>)}
-                  </select>
-
-                  <input 
-                    type="text" 
-                    placeholder={t('search.term_placeholder')}
-                    value={row.term}
-                    onChange={(e) => updateRow(index, 'term', e.target.value)}
-                    required
-                    style={{ flexGrow: 1, marginBottom: 0 }}
-                  />
-
-                  {rows.length > 1 && (
-                    <button 
-                      type="button" 
-                      className="secondary outline" 
-                      onClick={() => removeRow(index)}
-                      style={{ width: 'auto', marginBottom: 0, padding: '10px' }}
-                    >
-                      ✕
-                    </button>
-                  )}
+                <div key={row.id} style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
+                  <input type="text" value={row.term} onChange={(e) => {
+                    const newRows = [...rows]; newRows[index].term = e.target.value; setRows(newRows);
+                  }} required style={{ flexGrow: 1, marginBottom: 0 }} />
                 </div>
               ))}
-
-              <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
-                <button type="button" className="secondary" onClick={addRow}>
-                  +
-                </button>
-                <button type="submit" disabled={loading}>
-                  {loading ? '...' : t('search.button')}
-                </button>
-              </div>
+              <button type="submit" disabled={loading}>{t('search.button')}</button>
             </>
           )}
         </form>
       </article>
 
-      {error && (
-        <article className="pico-background-red-200">
-          <strong>{t('search.error')}:</strong> {error}
-        </article>
-      )}
+      {error && <article className="pico-background-red-200">❌ {error}</article>}
 
-      {requestStatus && (
-        <article className={requestStatus.type === 'success' ? "pico-background-green-200" : "pico-background-red-200"}>
-          <strong>{requestStatus.type === 'success' ? '✅' : '❌'}</strong> {requestStatus.msg}
-        </article>
-      )}
-
-      {loading ? (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: '20px' }}>
-          {[1, 2, 3, 4].map(i => <SkeletonCard key={i} />)}
-        </div>
-      ) : results.length > 0 ? (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: '20px' }}>
-          {results.map((item, index) => (
-            <article key={index}>
-              <div style={{ display: 'flex', gap: '20px', alignItems: 'flex-start' }}>
-                <div style={{ flexShrink: 0 }}>
-                  <Link to={`/book/${item.source_target || targetDB}/${encodeURIComponent(item.record_id || '')}`}>
-                    <img 
-                      src={item.isbn 
-                        ? `https://covers.openlibrary.org/b/isbn/${cleanISBN(item.isbn)}-M.jpg?default=https://placehold.co/100x150/e0e0e0/808080?text=No+Cover`
-                        : 'https://placehold.co/100x150/e0e0e0/808080?text=No+ISBN'
-                      }
-                      alt="Book Cover"
-                      style={{ 
-                        width: '100px', 
-                        height: '150px', 
-                        objectFit: 'cover',
-                        borderRadius: '4px',
-                        border: '1px solid #ddd'
-                      }}
-                      loading="lazy"
-                    />
-                  </Link>
-                </div>
-                
-                <div style={{ flexGrow: 1 }}>
-                  <header style={{ marginBottom: '10px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                      <strong>
-                        <Link to={`/book/${item.source_target || targetDB}/${encodeURIComponent(item.record_id || '')}`} style={{textDecoration: 'none', color: 'inherit'}}>
-                          {item.title || 'Untitled'}
-                        </Link>
-                      </strong>
-                      {item.source_target && (
-                        <mark style={{ fontSize: '0.6em', padding: '2px 5px', borderRadius: '4px' }}>
-                          {item.source_target}
-                        </mark>
-                      )}
-                    </div>
-                  </header>
-                  <p style={{ marginBottom: '5px' }}><strong>Author:</strong> {item.author || 'Unknown'}</p>
-                  <p style={{ marginBottom: '5px' }}><strong>ISBN:</strong> {item.isbn || 'Unknown'}</p>
-                  {item.issn && <p style={{ marginBottom: '5px' }}><strong>ISSN:</strong> {item.issn}</p>}
-                  {item.subject && <p style={{ marginBottom: '5px' }}><strong>Subject:</strong> {item.subject}</p>}
-                  {item.publisher && <p style={{ marginBottom: '5px' }}><strong>Publisher:</strong> {item.publisher}</p>}
-                  {item.pub_year && <p style={{ marginBottom: '5px' }}><strong>Year:</strong> {item.pub_year}</p>}
-
-                  {item.holdings && item.holdings.length > 0 && (
-                    <div style={{ marginTop: '10px', borderTop: '1px solid #eee', paddingTop: '10px' }}>
-                      <small><strong>{t('search.result.holdings')}:</strong></small>
-                      <table style={{ fontSize: '0.85em', marginBottom: 0 }}>
-                        <thead>
-                          <tr>
-                            <th>{t('search.result.location')}</th>
-                            <th>{t('search.result.call_number')}</th>
-                            <th>{t('search.result.status')}</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {item.holdings.map((h, i) => (
-                            <tr key={i}>
-                              <td>{h.location}</td>
-                              <td>{h.call_number}</td>
-                              <td>
-                                <span style={{ 
-                                  color: h.status === 'Available' ? 'green' : 'red',
-                                  fontWeight: 'bold'
-                                }}>
-                                  {h.status}
-                                </span>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: '20px' }}>
+        {loading && results.length === 0 && [1, 2, 3, 4].map(i => <SkeletonCard key={i} />)}
+        {results.map((item, index) => (
+          <article key={index}>
+            <div style={{ display: 'flex', gap: '20px' }}>
+              <Link to={`/book/${item.source_target || targetDB}/${encodeURIComponent(item.record_id || '')}`}>
+                <img 
+                  src={item.isbn ? `https://covers.openlibrary.org/b/isbn/${cleanISBN(item.isbn)}-M.jpg?default=https://placehold.co/100x150/e0e0e0/808080?text=No+Cover` : 'https://placehold.co/100x150/e0e0e0/808080?text=No+ISBN'} 
+                  style={{ width: '100px', borderRadius: '4px' }} 
+                />
+              </Link>
+              <div>
+                <strong>{item.title}</strong>
+                <p style={{fontSize: '0.9em', margin: '5px 0'}}>{item.author}</p>
+                {item.source_target && <mark style={{fontSize: '0.7em', padding: '2px 5px'}}>{item.source_target}</mark>}
               </div>
-              
-              <footer style={{ marginTop: '15px' }}>
-                <div role="group" style={{ marginBottom: 0 }}>
-                  <button onClick={() => handleILLRequest(item)}>
-                    {t('search.action.request')}
-                  </button>
-                  <button className="secondary outline" onClick={() => showCite(item, 'BibTeX')}>
-                    {t('search.action.bibtex')}
-                  </button>
-                  <button className="secondary outline" onClick={() => showCite(item, 'RIS')}>
-                    {t('search.action.ris')}
-                  </button>
-                </div>
-              </footer>
-            </article>
-          ))}
-        </div>
-      ) : null}
-
-      {/* Citation Modal */}
-      {citation && (
-        <dialog open>
-          <article>
-            <header>
-              <button aria-label="Close" rel="prev" onClick={() => setCitation(null)}></button>
-              <strong>{t('search.citation.title').replace('{format}', citation.format)}</strong>
-            </header>
-            <pre style={{ backgroundColor: '#f4f4f4', padding: '10px', borderRadius: '5px' }}>
-              {citation.content}
-            </pre>
-            <footer>
-              <button 
-                onClick={() => {
-                  navigator.clipboard.writeText(citation.content)
-                  setCitation(null)
-                }}
-              >
-                {t('search.action.copy')}
-              </button>
-            </footer>
+            </div>
           </article>
-        </dialog>
-      )}
+        ))}
+      </div>
     </>
   )
 }

@@ -33,7 +33,7 @@ frontend-copy:
 build-backend:
 	@echo "Verifying backend build..."
 	go mod tidy
-	go build -o /dev/null cmd/gateway/main.go
+	go build -o /dev/null ./cmd/gateway/...
 
 # 全量编译验证 (前端 + 后端)
 build: frontend-install frontend-build frontend-copy build-backend
