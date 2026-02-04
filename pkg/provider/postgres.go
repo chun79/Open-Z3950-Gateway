@@ -373,7 +373,7 @@ func (p *PostgresProvider) Fetch(db string, ids []string) ([]*z3950.MARCRecord, 
 	return records, nil
 }
 
-func (p *PostgresProvider) Scan(db, field, startTerm string) ([]ScanResult, error) {
+func (p *PostgresProvider) Scan(db, field, startTerm string, opts z3950.ScanOptions) ([]ScanResult, error) {
 	table := p.getTable(db)
 	sqlStr := fmt.Sprintf(`SELECT title, 1 FROM %s WHERE title >= $1 ORDER BY title ASC LIMIT 10`, table)
 	rows, err := p.db.Query(sqlStr, startTerm)

@@ -416,34 +416,82 @@ func (s *Server) handlePresent(conn net.Conn, connID string, req *ber.Packet) {
 }
 
 func (s *Server) handleScan(conn net.Conn, connID string, req *ber.Packet) {
+
 	term := ""
-	var findTerm func(*ber.Packet)
-	findTerm = func(p *ber.Packet) {
-		if p.Tag == 45 {
-			if val, ok := p.Value.([]byte); ok {
-				term = string(val)
-			} else {
-				term = string(p.Data.Bytes())
-			}
-		}
-		for _, c := range p.Children {
-			findTerm(c)
-		}
+
+	opts := z3950.ScanOptions{
+
+		Count:          10, // Default if not found
+
+		StepSize:       0,
+
+		PositionOfTerm: 1,
+
 	}
-	findTerm(req)
+
+
+
+	var walk func(*ber.Packet)
+
+	walk = func(p *ber.Packet) {
+
+		if p.Tag == 45 { // Term
+
+			if val, ok := p.Value.([]byte); ok { term = string(val) } else { term = string(p.Data.Bytes()) }
+
+		}
+
+		if p.Tag == 31 { // NumberOfTermsRequested
+
+			if v, ok := p.Value.(int64); ok { opts.Count = int(v) }
+
+		}
+
+		if p.Tag == 32 { // StepSize
+
+			if v, ok := p.Value.(int64); ok { opts.StepSize = int(v) }
+
+		}
+
+		if p.Tag == 33 { // PositionOfTerm
+
+			if v, ok := p.Value.(int64); ok { opts.PositionOfTerm = int(v) }
+
+		}
+
+		for _, c := range p.Children { walk(c) }
+
+	}
+
+	walk(req)
+
+
 
 	field := "title"
 
+
+
 	s.mu.RLock()
+
 	sess, ok := s.sessions[connID]
+
 	s.mu.RUnlock()
+
 	dbName := "Default"
+
 	if ok {
+
 		dbName = sess.DBName
+
 	}
 
-	results, _ := s.provider.Scan(dbName, field, term)
+
+
+	results, _ := s.provider.Scan(dbName, field, term, opts)
+
 	slog.Info("scan processed", "term", term, "found", len(results))
+
+
 
 	resp := ber.Encode(ber.ClassContext, ber.TypeConstructed, TagScanResponse, nil, "ScanResp")
 	resp.AppendChild(ber.NewInteger(ber.ClassUniversal, ber.TypePrimitive, ber.TagInteger, 0, "Step"))
@@ -939,7 +987,23 @@ func setupRouter(dbProvider provider.Provider) *gin.Engine {
 			return
 		}
 
-		results, err := dbProvider.Scan(db, field, term)
+		opts := z3950.ScanOptions{
+			Count:          20,
+			PositionOfTerm: 1,
+			StepSize:       0,
+		}
+
+		if v, err := strconv.Atoi(c.Query("count")); err == nil && v > 0 {
+			opts.Count = v
+		}
+		if v, err := strconv.Atoi(c.Query("position")); err == nil && v > 0 {
+			opts.PositionOfTerm = v
+		}
+		if v, err := strconv.Atoi(c.Query("step")); err == nil {
+			opts.StepSize = v
+		}
+
+		results, err := dbProvider.Scan(db, field, term, opts)
 		if err != nil {
 			slog.Error("provider scan failed", "db", db, "term", term, "error", err)
 			c.JSON(500, gin.H{"error": "Scan: " + err.Error()})

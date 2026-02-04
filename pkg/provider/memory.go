@@ -149,7 +149,7 @@ func (m *MemoryProvider) Fetch(db string, ids []string) ([]*z3950.MARCRecord, er
 	return records, nil
 }
 
-func (m *MemoryProvider) Scan(db, field, startTerm string) ([]ScanResult, error) {
+func (m *MemoryProvider) Scan(db, field, startTerm string, opts z3950.ScanOptions) ([]ScanResult, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	

@@ -88,27 +88,35 @@ type User struct {
 
 	
 
-			Fetch(db string, ids []string) ([]*z3950.MARCRecord, error)
+				Fetch(db string, ids []string) ([]*z3950.MARCRecord, error)
 
 	
 
-		
+			
 
 	
 
-			// Scan 浏览索引
+				// Scan browses the index.
 
 	
 
-			Scan(db, field, startTerm string) ([]ScanResult, error)
+				// opts allows setting count, step size, and position.
 
 	
 
-		
+				Scan(db, field, startTerm string, opts z3950.ScanOptions) ([]ScanResult, error)
+
+	
+
+			
 
 	
 
 				// CreateILLRequest creates a new Inter-Library Loan request.
+
+	
+
+			
 			
 				CreateILLRequest(req ILLRequest) error
 			

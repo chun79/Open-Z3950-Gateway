@@ -380,7 +380,7 @@ rows, err := p.db.Query(query, args...)
 	return records, nil
 }
 
-func (p *SQLiteProvider) Scan(db, field, startTerm string) ([]ScanResult, error) {
+func (p *SQLiteProvider) Scan(db, field, startTerm string, opts z3950.ScanOptions) ([]ScanResult, error) {
 	var sqlStr string
 	if field == "author" {
 		sqlStr = `SELECT TRIM(author), 1 FROM bibliography WHERE author >= ? ORDER BY author ASC LIMIT 10`

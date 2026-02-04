@@ -190,7 +190,7 @@ func (p *ProxyProvider) Fetch(db string, ids []string) ([]*z3950.MARCRecord, err
 	return records, nil
 }
 
-func (p *ProxyProvider) Scan(db, field, startTerm string) ([]ScanResult, error) {
+func (p *ProxyProvider) Scan(db, field, startTerm string, opts z3950.ScanOptions) ([]ScanResult, error) {
 	client, config, err := p.connectToTarget(db)
 	if err != nil {
 		return nil, err
@@ -198,23 +198,28 @@ func (p *ProxyProvider) Scan(db, field, startTerm string) ([]ScanResult, error) 
 	defer client.Close()
 
 	// Map field string to Bib-1 Use Attribute
-	attrs := make(map[int]int)
-	switch field {
-	case "author":
-		attrs[1] = 1003
-	case "subject":
-		attrs[1] = 21
-	case "isbn":
-		attrs[1] = 7
-	case "issn":
-		attrs[1] = 8
-	case "title":
-		attrs[1] = 4
-	default:
-		attrs[1] = 4 // Default to Title
+	if opts.Attributes == nil {
+		opts.Attributes = make(map[int]int)
+	}
+	// Only set attribute if not already provided in opts
+	if _, ok := opts.Attributes[1]; !ok {
+		switch field {
+		case "author":
+			opts.Attributes[1] = 1003
+		case "subject":
+			opts.Attributes[1] = 21
+		case "isbn":
+			opts.Attributes[1] = 7
+		case "issn":
+			opts.Attributes[1] = 8
+		case "title":
+			opts.Attributes[1] = 4
+		default:
+			opts.Attributes[1] = 4 // Default to Title
+		}
 	}
 
-	entries, err := client.Scan(config.DatabaseName, startTerm, attrs)
+	entries, err := client.ScanWithOpts(config.DatabaseName, startTerm, opts)
 	if err != nil {
 		return nil, fmt.Errorf("remote scan failed: %w", err)
 	}

@@ -40,11 +40,11 @@ func (h *HybridProvider) Fetch(db string, ids []string) ([]*z3950.MARCRecord, er
 	return h.proxy.Fetch(db, ids)
 }
 
-func (h *HybridProvider) Scan(db, field, startTerm string) ([]ScanResult, error) {
+func (h *HybridProvider) Scan(db, field, startTerm string, opts z3950.ScanOptions) ([]ScanResult, error) {
 	if h.isLocalDB(db) {
-		return h.local.Scan(db, field, startTerm)
+		return h.local.Scan(db, field, startTerm, opts)
 	}
-	return h.proxy.Scan(db, field, startTerm)
+	return h.proxy.Scan(db, field, startTerm, opts)
 }
 
 // ILL operations ALWAYS go to local storage

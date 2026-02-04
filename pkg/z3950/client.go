@@ -479,6 +479,22 @@ func findOctetString(p *ber.Packet) []byte {
 }
 
 func (c *Client) Scan(dbName string, startTerm string, attributes map[int]int) ([]ScanEntry, error) {
+	return c.ScanWithOpts(dbName, startTerm, ScanOptions{
+		Count:          10,
+		StepSize:       0,
+		PositionOfTerm: 1,
+		Attributes:     attributes,
+	})
+}
+
+type ScanOptions struct {
+	Count          int
+	StepSize       int
+	PositionOfTerm int
+	Attributes     map[int]int
+}
+
+func (c *Client) ScanWithOpts(dbName string, startTerm string, opts ScanOptions) ([]ScanEntry, error) {
 	pdu := ber.Encode(ber.ClassContext, ber.TypeConstructed, 35, nil, "ScanRequest")
 	
 	dbs := ber.Encode(ber.ClassContext, ber.TypeConstructed, 3, nil, "DatabaseNames")
@@ -492,8 +508,8 @@ func (c *Client) Scan(dbName string, startTerm string, attributes map[int]int) (
 	
 	attrType := 1
 	attrVal := 4
-	if attributes != nil {
-		if v, ok := attributes[1]; ok {
+	if opts.Attributes != nil {
+		if v, ok := opts.Attributes[1]; ok {
 			attrVal = v
 		}
 	}
@@ -507,9 +523,19 @@ func (c *Client) Scan(dbName string, startTerm string, attributes map[int]int) (
 	apt.AppendChild(term)
 	
 	pdu.AppendChild(apt)
-	pdu.AppendChild(ber.NewInteger(ber.ClassContext, ber.TypePrimitive, 31, 10, "NumberOfTermsRequested"))
-	pdu.AppendChild(ber.NewInteger(ber.ClassContext, ber.TypePrimitive, 32, 0, "StepSize"))
-	pdu.AppendChild(ber.NewInteger(ber.ClassContext, ber.TypePrimitive, 33, 1, "PositionOfTerm"))
+	
+	count := 20
+	if opts.Count > 0 { count = opts.Count }
+	
+	step := 0
+	if opts.StepSize > 0 { step = opts.StepSize }
+	
+	pos := 1
+	if opts.PositionOfTerm > 0 { pos = opts.PositionOfTerm }
+
+	pdu.AppendChild(ber.NewInteger(ber.ClassContext, ber.TypePrimitive, 31, int64(count), "NumberOfTermsRequested"))
+	pdu.AppendChild(ber.NewInteger(ber.ClassContext, ber.TypePrimitive, 32, int64(step), "StepSize"))
+	pdu.AppendChild(ber.NewInteger(ber.ClassContext, ber.TypePrimitive, 33, int64(pos), "PositionOfTerm"))
 
 	resp, err := c.sendPDU(pdu)
 	if err != nil {
