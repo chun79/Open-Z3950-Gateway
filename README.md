@@ -1,135 +1,172 @@
 # Open-Z3950-Gateway
 
-![Go](https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat&logo=go)
+![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?style=flat&logo=go)
 ![React](https://img.shields.io/badge/Frontend-React_18-61DAFB?style=flat&logo=react)
-![Protocol](https://img.shields.io/badge/Protocol-Z39.50%20(ISO%2023950)-blue)
+![Wails](https://img.shields.io/badge/Desktop-Wails_v2-red?logo=wails)
+![gRPC](https://img.shields.io/badge/API-gRPC%20%2F%20ConnectRPC-blue)
 ![License](https://img.shields.io/badge/License-MIT-green)
-![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker)
 
-**Open-Z3950-Gateway** is a modern, enterprise-grade Inter-Library Loan (ILL) and Z39.50 gateway platform. It bridges the gap between modern Web APIs and legacy library protocols, providing a beautiful, unified interface for searching and managing bibliographic data across the globe.
+**Open-Z3950-Gateway** is a next-generation library gateway platform that bridges the gap between modern Web/Desktop applications and the legacy Z39.50 library protocol.
 
-> **Why this exists:** Most library systems are locked behind ancient Z39.50 protocols and ugly desktop clients. This project modernizes the experience with a reactive Web UI, JSON APIs, and seamless proxying.
+It features a **Hybrid Architecture** supporting both classic REST APIs and high-performance **gRPC Streaming**, along with a native Desktop application built with Wails.
+
+---
 
 ## ✨ Key Features
 
-### 🔍 Powerful Search Engine
-*   **Hybrid Search**: Simultaneously search your local database (SQLite/Postgres) and remote Z39.50 targets (Oxford, Harvard, Library of Congress).
-*   **Recursive Boolean Queries**: Build complex queries like `(Title=Linux OR Title=Unix) AND (Author=Torvalds)`.
-*   **Intelligent Decoding**: Automatically handles legacy character encodings (MARC-8, GBK, Big5, ANSEL) and converts them to UTF-8.
+### 🚀 High-Performance Search
+*   **Federated Streaming Search**: Query multiple libraries (e.g., Library of Congress, Oxford, Harvard) concurrently. Results are **streamed** to the UI in real-time via gRPC (Web) or Native Events (Desktop).
+*   **Z39.50 Scan**: Browse indexes (Title, Author, Subject) with infinite scrolling context.
+*   **Hybrid Provider**: Seamlessly blends results from local databases (SQLite/Postgres) and remote Z39.50 targets.
 
-### 🌐 Modern Web Interface
-*   **Responsive Design**: Built with React and Pico.css for a clean, mobile-friendly experience.
-*   **Internationalization (I18n)**: Full support for **English** and **Chinese (简体中文)**.
-*   **Search History**: Local-storage based history for quick query restoration.
-*   **Citation Generation**: One-click export to **BibTeX** and **RIS** formats.
+### 💻 Native Desktop App
+*   **Cross-Platform**: Runs natively on **macOS**, **Windows**, and **Linux** using Wails v2.
+*   **Local-First**: Built-in SQLite database for offline bookshelf management and search history.
+*   **Zero-Config**: Pre-configured with major world libraries; just download and run.
 
-### 📚 Library Management
-*   **Holdings Display**: Real-time availability status, call numbers, and shelf locations.
-*   **ILL Workflow**: Integrated Request -> Review -> Approve/Reject workflow for inter-library loans.
-*   **Dynamic Targets**: Admins can add/configure remote Z39.50 servers via the UI without restarting.
+### 🌐 Modern Web Platform
+*   **Responsive UI**: Built with React + Pico.css + Vite.
+*   **Admin Dashboard**: Full ILL (Inter-Library Loan) request management workflow (Approve/Reject).
+*   **Swagger UI**: Interactive API documentation available at `/swagger/index.html`.
 
-### 🔄 Inter-Library Loan (ILL) System
-The gateway includes a built-in ILL management system that bridges the gap between discovery and fulfillment:
-
-1.  **Discovery**: Users find items across multiple remote libraries (Z39.50 targets).
-2.  **Request**: One-click "Request Item" generates an ILL ticket populated with MARC metadata.
-3.  **Management**: 
-    *   **User Dashboard**: Track status of requested items (Pending/Approved/Rejected).
-    *   **Admin Console**: Review incoming requests, manage approvals, and handle fulfillment logistics.
-4.  **Protocol Agnostic**: While search relies on Z39.50, the ILL system is an internal workflow layer, allowing loans from any connected source.
+---
 
 ## 🛠 Architecture
 
 ```mermaid
 graph TD
-    User((User)) -->|Browser| WebUI[Web Frontend]
-    User -->|API| Gateway[Go API Gateway :8899]
-    ExternalZ((External Client)) -->|Z39.50| ZServer[Z39.50 Server :2100]
-
-    subgraph "Monolith Container"
-        WebUI -->|Internal API| Gateway
-        Gateway --> Auth[JWT Auth Middleware]
-        ZServer --> Hybrid
-        Auth --> Hybrid[Hybrid Provider]
-        
-        Hybrid -->|Local Data| LocalDB[(SQLite/Postgres)]
-        Hybrid -->|Remote Search| Proxy[Z39.50 Proxy Client]
+    subgraph "Clients"
+        Browser[Web Browser]
+        Desktop[Desktop App (Wails)]
+        ExtClient[External Z39.50 Client]
     end
 
-    Proxy -->|TCP/Z39.50| Oxford[University of Oxford]
-    Proxy -->|TCP/Z39.50| LOC[Library of Congress]
-    Proxy -->|TCP/Z39.50| Harvard[Harvard University]
+    subgraph "Gateway Service (:8899)"
+        Router[Gin Router]
+        Auth[JWT Middleware]
+        ConnectRPC[ConnectRPC Handler]
+        RestAPI[REST Handlers]
+        ZServer[Z39.50 TCP Server (:2100)]
+        
+        Router --> Auth
+        Auth --> RestAPI
+        Auth --> ConnectRPC
+    end
+
+    subgraph "Core Logic"
+        Hybrid[Hybrid Provider]
+        Proxy[Z39.50 Client]
+        LocalDB[(SQLite / Postgres)]
+    end
+
+    Browser -->|HTTP/2 gRPC-Web| ConnectRPC
+    Browser -->|HTTP/1.1 REST| RestAPI
+    Desktop -->|Native Bindings| Proxy
+    ExtClient -->|TCP/Z39.50| ZServer
+
+    RestAPI --> Hybrid
+    ConnectRPC --> Hybrid
+    ZServer --> Hybrid
+
+    Hybrid -->|Read/Write| LocalDB
+    Hybrid -->|Search/Scan| Proxy
+
+    Proxy -->|Z39.50 (ASN.1/BER)| Targets[Remote Libraries\n(LOC, Oxford, Yale...)]
 ```
+
+---
 
 ## 🚀 Quick Start
 
-### Docker (Recommended)
-
-Run the full stack with a single command. The image is optimized (Alpine-based, ~25MB).
+### Option A: Docker (Web Service)
+Ideal for server deployment. Includes Gateway + Webapp + Database.
 
 ```bash
-docker compose up -d --build
+# 1. Start services (defaults to SQLite mode)
+docker compose up -d
+
+# 2. Access Web UI
+open http://localhost:8899
+
+# 3. Access Swagger API Docs
+open http://localhost:8899/swagger/index.html
 ```
 
-Access the application at **http://localhost:8899**.
+### Option B: Desktop App (Local Development)
+Ideal for personal use or development on macOS/Windows.
 
-*   **Admin Account**: `admin` / `admin`
-*   **User Account**: Register a new one via the UI.
+**Prerequisites**: Go 1.21+, Node.js 18+, Wails CLI (`go install github.com/wailsapp/wails/v2/cmd/wails@latest`)
 
-### Manual Build
+```bash
+# 1. Enter desktop directory
+cd desktop
 
-1.  **Build Frontend**:
-    ```bash
-    cd webapp
-    npm install && npm run build
-    cd ..
-    ```
-2.  **Prepare Assets**:
-    ```bash
-    mkdir -p pkg/ui
-    cp -r webapp/dist pkg/ui/dist
-    ```
-3.  **Build Backend**:
-    ```bash
-    # Requires Go 1.24+
-    go build -o gateway ./cmd/gateway
-    ```
-4.  **Run**:
-    ```bash
-    export DB_PROVIDER=sqlite
-    export DB_PATH=./library.db
-    ./gateway
-    ```
+# 2. Run in Dev Mode (Hot Reload)
+wails dev
+
+# 3. Build Production Binary
+wails build
+```
+
+### Option C: Manual Backend Build
+For hacking on the gateway logic without Docker.
+
+```bash
+# 1. Build Frontend
+make frontend-install frontend-build
+
+# 2. Embed & Build Backend
+make build
+
+# 3. Run Gateway
+./gateway
+```
+
+---
+
+## 📚 API Documentation
+
+The Gateway provides a unified API surface for all clients.
+
+### gRPC / ConnectRPC
+*   **Endpoint**: `https://your-gateway/gateway.v1.GatewayService`
+*   **Protocol**: HTTP/2 or HTTP/1.1 (via Connect protocol)
+*   **Service Definition**: [proto/gateway/v1/gateway.proto](proto/gateway/v1/gateway.proto)
+
+### REST API
+*   `GET /api/search`: Standard search (JSON).
+*   `GET /api/federated-search`: Concurrent search across multiple targets.
+*   `GET /api/scan`: Browse index terms (e.g. for autocomplete).
+*   `POST /api/ill-requests`: Submit a loan request.
+
+View full interactive docs at **`/swagger/index.html`** after starting the server.
+
+---
 
 ## ⚙️ Configuration
 
-The application is configured via environment variables.
+Configure via `.env` file or environment variables.
 
 | Variable | Description | Default |
 | :--- | :--- | :--- |
-| `DB_PROVIDER` | Database backend: `sqlite` or `postgres` | `sqlite` |
-| `DB_PATH` | Path to SQLite database file | `./library.db` |
-| `DB_DSN` | Postgres connection string | - |
-| `JWT_SECRET` | Secret key for signing JWT tokens | (Hardcoded dev secret) |
-| `PORT` | HTTP Server Port | `8899` |
+| `PORT` | Web/API Port | `8899` |
 | `ZSERVER_PORT` | Z39.50 Server Port | `2100` |
-| `GATEWAY_API_KEY`| API Key for protected non-user endpoints | - |
+| `DB_PROVIDER` | `sqlite` or `postgres` | `sqlite` |
+| `DB_PATH` | Path to SQLite DB file | `library.db` |
+| `DB_DSN` | Postgres connection string | (Empty) |
+| `GATEWAY_API_KEY` | Admin API Key (Bypass JWT) | - |
 
-## 📖 Documentation
-
-*   [**Protocol Details**](docs/PROTOCOL.md): Technical specs of the Z39.50 implementation (PDUs, OIDs).
-*   [**Maintenance Tools**](docs/TOOLS.md): CLI utilities for database inspection and connection debugging.
-*   [**Frontend Guide**](webapp/README.md): Development guide for the React application.
+---
 
 ## 🤝 Contributing
 
-We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details.
-
-1.  Fork the repo.
-2.  Create your feature branch (`git checkout -b feat/amazing-feature`).
-3.  Commit your changes (`git commit -m 'feat: add amazing feature'`).
-4.  Push to the branch (`git push origin feat/amazing-feature`).
-5.  Open a Pull Request.
+1.  **Fork** the repository.
+2.  **Clone** your fork.
+3.  **Install tools**: `go install google.golang.org/protobuf/cmd/protoc-gen-go@latest` and `connectrpc.com/connect/cmd/protoc-gen-connect-go@latest`.
+4.  **Create a branch** (`git checkout -b feat/new-feature`).
+5.  **Commit** (`git commit -m 'feat: add amazing feature'`).
+6.  **Push** (`git push origin feat/new-feature`).
+7.  Open a **Pull Request**.
 
 ## License
 
